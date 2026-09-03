@@ -71,7 +71,10 @@ export const FiltersModal: React.FC<FiltersModalProps> = ({
 
   // 4. 필터 적용 범위 & 부가 옵션
   const [scope, setScope] = useState<'active' | 'all'>('active');
-  const [outlineColor, setOutlineColor] = useState(primaryColor || '#0f172a');
+  // 외곽선은 스프라이트와 대비되어야 의미가 있다.
+  // 현재 그리기 색(primaryColor)을 기본값으로 쓰면, 방금 그 색으로 그린 그림에
+  // 같은 색 외곽선이 생겨 "아무 일도 일어나지 않은 것처럼" 보이므로 어두운 색을 기본으로 둔다.
+  const [outlineColor, setOutlineColor] = useState('#0f172a');
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [activeTab, setActiveTab] = useState<'tone' | 'effects' | 'geometry'>('geometry');
 
@@ -173,8 +176,8 @@ export const FiltersModal: React.FC<FiltersModalProps> = ({
     transformFn: (pixels: string[]) => string[],
     desc: string
   ) => {
-    const targetLayerIds = scope === 'active' 
-      ? [activeLayerId] 
+    const targetLayerIds = scope === 'active'
+      ? [activeLayerId]
       : layers.filter(l => l.visible).map(l => l.id);
 
     // 현재 캔버스에 떠 있는 레이어 픽셀 기준으로 변환
@@ -191,10 +194,9 @@ export const FiltersModal: React.FC<FiltersModalProps> = ({
       return match ? { id: backup.id, pixels: [...match.pixels] } : backup;
     });
 
-    // 캔버스에 즉각 반영
-    if (onPreviewLayerFilter) {
-      onPreviewLayerFilter(updatedLayers);
-    }
+    // 슬라이더와 달리 이 효과들은 되돌릴 수 없는 확정 편집이므로 히스토리에 기록한다.
+    // (미리보기로만 반영하면 Ctrl+Z로 취소할 수 없고, 백업까지 덮어써서 '취소하고 닫기'로도 되돌릴 수 없다)
+    onApplyLayerFilter(updatedLayers, desc);
   };
 
   // 취소 시: 열리기 전 원래 백업으로 롤백 후 닫기
@@ -521,6 +523,14 @@ export const FiltersModal: React.FC<FiltersModalProps> = ({
                       <span className="text-xs font-bold text-gray-200">1px 도트 외곽선 생성</span>
                     </div>
                     <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => setOutlineColor(primaryColor)}
+                        disabled={outlineColor.toLowerCase() === primaryColor.toLowerCase()}
+                        className="text-[10px] px-1.5 py-0.5 rounded border border-gray-700 text-gray-400 hover:text-emerald-400 hover:border-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        title="현재 그리기 색을 외곽선 색으로 사용"
+                      >
+                        현재 색
+                      </button>
                       <input
                         type="color"
                         value={outlineColor}
