@@ -1,4 +1,4 @@
-import { Layer, LayerGroup } from '../types';
+import { Layer, LayerGroup, PixelClipboard, SelectionRect } from '../types';
 
 export interface RGBA {
   r: number;
@@ -378,4 +378,86 @@ export function blendPixelArrays(
       outA
     );
   });
+}
+
+/**
+ * 드래그 시작/끝 좌표를 캔버스 안쪽의 정규화된 사각 선택 영역으로 변환한다.
+ * 좌표 순서(역방향 드래그)와 캔버스 경계를 모두 보정하며,
+ * 면적이 0이면 null을 반환한다.
+ */
+export function normalizeSelection(
+  startX: number,
+  startY: number,
+  endX: number,
+  endY: number,
+  canvasWidth: number,
+  canvasHeight: number
+): SelectionRect | null {
+  const x0 = Math.max(0, Math.min(canvasWidth - 1, Math.min(startX, endX)));
+  const y0 = Math.max(0, Math.min(canvasHeight - 1, Math.min(startY, endY)));
+  const x1 = Math.max(0, Math.min(canvasWidth - 1, Math.max(startX, endX)));
+  const y1 = Math.max(0, Math.min(canvasHeight - 1, Math.max(startY, endY)));
+
+  const width = x1 - x0 + 1;
+  const height = y1 - y0 + 1;
+  if (width <= 0 || height <= 0) return null;
+
+  return { x: x0, y: y0, width, height };
+}
+
+/** 선택 영역 안의 픽셀을 잘라내어 클립보드 조각으로 만든다 */
+export function copyRegion(
+  pixels: string[],
+  canvasWidth: number,
+  region: SelectionRect
+): PixelClipboard {
+  const out: string[] = new Array(region.width * region.height);
+  for (let y = 0; y < region.height; y++) {
+    for (let x = 0; x < region.width; x++) {
+      out[y * region.width + x] = pixels[(region.y + y) * canvasWidth + (region.x + x)] || '';
+    }
+  }
+  return { width: region.width, height: region.height, pixels: out };
+}
+
+/** 선택 영역 안의 픽셀을 모두 비운 새 배열을 반환한다 */
+export function clearRegion(
+  pixels: string[],
+  canvasWidth: number,
+  region: SelectionRect
+): string[] {
+  const out = [...pixels];
+  for (let y = 0; y < region.height; y++) {
+    for (let x = 0; x < region.width; x++) {
+      out[(region.y + y) * canvasWidth + (region.x + x)] = '';
+    }
+  }
+  return out;
+}
+
+/**
+ * 클립보드 조각을 (destX, destY) 위치에 붙여넣은 새 배열을 반환한다.
+ * 캔버스 밖으로 나가는 부분은 잘라내고, 조각의 빈 픽셀은 기존 픽셀을 지우지 않는다.
+ */
+export function pasteRegion(
+  pixels: string[],
+  canvasWidth: number,
+  canvasHeight: number,
+  clip: PixelClipboard,
+  destX: number,
+  destY: number
+): string[] {
+  const out = [...pixels];
+  for (let y = 0; y < clip.height; y++) {
+    const targetY = destY + y;
+    if (targetY < 0 || targetY >= canvasHeight) continue;
+    for (let x = 0; x < clip.width; x++) {
+      const targetX = destX + x;
+      if (targetX < 0 || targetX >= canvasWidth) continue;
+      const color = clip.pixels[y * clip.width + x];
+      if (!color) continue; // 조각의 투명 부분은 아래 픽셀을 유지
+      out[targetY * canvasWidth + targetX] = color;
+    }
+  }
+  return out;
 }

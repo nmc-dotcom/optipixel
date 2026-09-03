@@ -1,14 +1,15 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-import { Layer, LayerGroup, ToolType } from '../types';
-import { 
-  compositeLayers, 
-  floodFill, 
-  getBrushStamp, 
-  getCirclePoints, 
-  getLinePoints, 
-  getRectanglePoints, 
-  hexToRgba, 
-  rgbaToHex 
+import { Layer, LayerGroup, SelectionRect, ToolType } from '../types';
+import {
+  compositeLayers,
+  floodFill,
+  getBrushStamp,
+  getCirclePoints,
+  getLinePoints,
+  getRectanglePoints,
+  hexToRgba,
+  normalizeSelection,
+  rgbaToHex
 } from '../utils/pixelEngine';
 import { ZoomIn, ZoomOut, Maximize2, Move as MoveIcon, Sun, Moon } from 'lucide-react';
 
@@ -29,6 +30,8 @@ interface PixelCanvasProps {
   onZoomChange: (newZoom: number) => void;
   onUpdateLayerPixels: (layerId: string, newPixels: string[], recordHistory?: boolean, description?: string) => void;
   onPickColor: (color: string) => void;
+  selection: SelectionRect | null;
+  onChangeSelection: (selection: SelectionRect | null) => void;
   onionSkinEnabled?: boolean;
   onionSkinPixels?: string[] | null;
 }
@@ -50,6 +53,8 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
   onZoomChange,
   onUpdateLayerPixels,
   onPickColor,
+  selection,
+  onChangeSelection,
   onionSkinEnabled = false,
   onionSkinPixels = null,
 }) => {
@@ -92,6 +97,9 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
   const startPointRef = useRef<{ x: number; y: number } | null>(null);
   const lastPointRef = useRef<{ x: number; y: number } | null>(null);
   const previewPixelsRef = useRef<string[] | null>(null);
+
+  // 선택 도구 드래그 중인 임시 영역 (마우스를 놓으면 확정)
+  const [pendingSelection, setPendingSelection] = useState<SelectionRect | null>(null);
 
   // 터치 제스처 (2핑거 핀치 줌 & 팬)
   const touchDistanceRef = useRef<number | null>(null);
@@ -143,6 +151,18 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
       return null;
     }
     return { x: px, y: py };
+  }, [panOffset, zoom, width, height]);
+
+  // 캔버스 밖으로 드래그해도 경계까지는 선택되도록, null 대신 잘라낸 좌표를 돌려준다
+  const clampToCanvas = useCallback((clientX: number, clientY: number): { x: number; y: number } => {
+    if (!containerRef.current) return { x: 0, y: 0 };
+    const rect = containerRef.current.getBoundingClientRect();
+    const px = Math.floor((clientX - rect.left - panOffset.x) / zoom);
+    const py = Math.floor((clientY - rect.top - panOffset.y) / zoom);
+    return {
+      x: Math.max(0, Math.min(width - 1, px)),
+      y: Math.max(0, Math.min(height - 1, py)),
+    };
   }, [panOffset, zoom, width, height]);
 
   // 레이어 합성 결과 캐시.
@@ -271,6 +291,27 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
       ctx.setLineDash([]);
     }
 
+    // 5-B. 선택 영역 표시 (확정된 영역 또는 드래그 중인 임시 영역)
+    const shownSelection = pendingSelection ?? selection;
+    if (shownSelection) {
+      const sx = shownSelection.x * zoom;
+      const sy = shownSelection.y * zoom;
+      const sw = shownSelection.width * zoom;
+      const sh = shownSelection.height * zoom;
+
+      // 어두운 배경/밝은 배경 어디서든 보이도록 흰 점선 위에 검은 점선을 엇갈려 겹친다
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
+      ctx.lineDashOffset = 0;
+      ctx.strokeRect(sx + 0.5, sy + 0.5, sw - 1, sh - 1);
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.85)';
+      ctx.lineDashOffset = 4;
+      ctx.strokeRect(sx + 0.5, sy + 0.5, sw - 1, sh - 1);
+      ctx.setLineDash([]);
+      ctx.lineDashOffset = 0;
+    }
+
     // 6. 커서 호버 박스 미리보기
     if (cursorPos && !isPanning) {
       ctx.strokeStyle = canvasBackdrop === 'dark' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)';
@@ -288,7 +329,7 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
         }
       });
     }
-  }, [baseComposite, width, height, zoom, showGrid, horizontalSymmetry, cursorPos, isPanning, brushSize, onionSkinEnabled, onionSkinPixels, canvasBackdrop]);
+  }, [baseComposite, width, height, zoom, showGrid, horizontalSymmetry, cursorPos, isPanning, brushSize, onionSkinEnabled, onionSkinPixels, canvasBackdrop, selection, pendingSelection]);
 
   useEffect(() => {
     render();
@@ -367,6 +408,21 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
       return;
     }
 
+    // 선택 도구는 잠긴 레이어에서도 동작해야 하므로(복사 용도) 잠금 검사 앞에서 처리
+    if (currentTool === 'select') {
+      const selectPt = screenToPixelCoord(e.clientX, e.clientY);
+      if (!selectPt) {
+        onChangeSelection(null);
+        return;
+      }
+      isDrawingRef.current = true;
+      startPointRef.current = selectPt;
+      setPendingSelection(
+        normalizeSelection(selectPt.x, selectPt.y, selectPt.x, selectPt.y, width, height)
+      );
+      return;
+    }
+
     if (!activeLayer || activeLayer.locked || !activeLayer.visible) return;
 
     const pt = screenToPixelCoord(e.clientX, e.clientY);
@@ -416,6 +472,22 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
         x: e.clientX - panStartRef.current.x,
         y: e.clientY - panStartRef.current.y,
       });
+      return;
+    }
+
+    // 선택 영역 드래그 중 (커서가 캔버스 밖으로 나가도 경계까지 확장되도록 pt 없이도 처리)
+    if (currentTool === 'select' && isDrawingRef.current && startPointRef.current) {
+      const edge = pt ?? clampToCanvas(e.clientX, e.clientY);
+      setPendingSelection(
+        normalizeSelection(
+          startPointRef.current.x,
+          startPointRef.current.y,
+          edge.x,
+          edge.y,
+          width,
+          height
+        )
+      );
       return;
     }
 
@@ -474,6 +546,21 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
   const handlePointerUp = (e: React.PointerEvent) => {
     if (isPanning) {
       setIsPanning(false);
+      return;
+    }
+
+    // 선택 영역 확정. 드래그 없이 클릭만 했으면(1x1) 선택을 해제한다.
+    if (currentTool === 'select') {
+      if (isDrawingRef.current) {
+        isDrawingRef.current = false;
+        const committed =
+          pendingSelection && (pendingSelection.width > 1 || pendingSelection.height > 1)
+            ? pendingSelection
+            : null;
+        onChangeSelection(committed);
+        setPendingSelection(null);
+        startPointRef.current = null;
+      }
       return;
     }
 
@@ -566,6 +653,23 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
       onPointerUp={handlePointerUp}
       onPointerLeave={() => {
         setCursorPos(null);
+
+        // 선택 드래그 중 커서가 캔버스를 벗어나면, 여기까지 끌린 영역을 그대로 확정한다.
+        // (확정하지 않으면 pointerUp이 무시되어 점선만 남고 선택이 되지 않는다)
+        if (currentTool === 'select') {
+          if (isDrawingRef.current) {
+            isDrawingRef.current = false;
+            onChangeSelection(
+              pendingSelection && (pendingSelection.width > 1 || pendingSelection.height > 1)
+                ? pendingSelection
+                : null
+            );
+            setPendingSelection(null);
+            startPointRef.current = null;
+          }
+          return;
+        }
+
         if (isDrawingRef.current && activeLayer) {
           isDrawingRef.current = false;
           if (previewPixelsRef.current) {

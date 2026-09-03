@@ -1,12 +1,28 @@
-export type ToolType = 
-  | 'brush' 
-  | 'eraser' 
-  | 'bucket' 
-  | 'picker' 
-  | 'line' 
-  | 'rect' 
-  | 'circle' 
-  | 'move';
+export type ToolType =
+  | 'brush'
+  | 'eraser'
+  | 'bucket'
+  | 'picker'
+  | 'line'
+  | 'rect'
+  | 'circle'
+  | 'move'
+  | 'select';
+
+/** 사각 선택 영역 (캔버스 픽셀 좌표) */
+export interface SelectionRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** 복사/잘라내기한 픽셀 조각 */
+export interface PixelClipboard {
+  width: number;
+  height: number;
+  pixels: string[]; // 길이 = width * height
+}
 
 export interface LayerGroup {
   id: string;

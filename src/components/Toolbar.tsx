@@ -7,8 +7,9 @@ import {
   Minus, 
   Square, 
   Circle, 
-  Move, 
-  FlipHorizontal, 
+  Move,
+  SquareDashed,
+  FlipHorizontal,
   Grid, 
   ZoomIn, 
   ZoomOut, 
@@ -57,7 +58,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
     { id: 'line', label: '직선', icon: <Minus className="w-4 h-4" />, shortcut: 'L' },
     { id: 'rect', label: '사각형', icon: <Square className="w-4 h-4" />, shortcut: 'U' },
     { id: 'circle', label: '원형', icon: <Circle className="w-4 h-4" />, shortcut: 'C' },
-    { id: 'move', label: '이동 도구', icon: <Move className="w-4 h-4" />, shortcut: 'M' },
+    { id: 'select', label: '영역 선택', icon: <SquareDashed className="w-4 h-4" />, shortcut: 'S' },
+    { id: 'move', label: '화면 이동', icon: <Move className="w-4 h-4" />, shortcut: 'M' },
   ];
 
   return (

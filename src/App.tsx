@@ -1,14 +1,17 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { 
-  CanvasDimensions, 
-  HistoryStep, 
-  Layer, 
-  LayerGroup, 
-  PalettePreset, 
-  ToolType 
+import {
+  CanvasDimensions,
+  HistoryStep,
+  Layer,
+  LayerGroup,
+  PalettePreset,
+  PixelClipboard,
+  SelectionRect,
+  ToolType
 } from './types';
+import { X } from 'lucide-react';
 import { DEFAULT_PALETTES, generateInitialPixels } from './constants/presets';
-import { blendPixelArrays } from './utils/pixelEngine';
+import { blendPixelArrays, clearRegion, copyRegion, pasteRegion } from './utils/pixelEngine';
 import {
   downloadProjectFile,
   loadProjectFromStorage,
@@ -90,6 +93,10 @@ export default function App() {
       return [];
     }
   });
+
+  // 4-B. 선택 영역 & 픽셀 클립보드
+  const [selection, setSelection] = useState<SelectionRect | null>(null);
+  const [clipboard, setClipboard] = useState<PixelClipboard | null>(null);
 
   // 5. 모바일 사이드 시트 탭
   const [activeMobileTab, setActiveMobileTab] = useState<'none' | 'layers' | 'palette'>('none');
@@ -289,13 +296,36 @@ export default function App() {
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
         setIsExportModalOpen(true);
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
+        e.preventDefault();
+        handleCopySelection();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'x') {
+        e.preventDefault();
+        handleCutSelection();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
+        e.preventDefault();
+        handlePasteClipboard();
+      } else if (e.key === 'Escape') {
+        setSelection(null);
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (layers.length > 1) {
+        // 선택 영역이 있으면 그 안의 픽셀만 지우고, 없을 때만 레이어 삭제로 넘어간다
+        if (selection) {
+          e.preventDefault();
+          handleDeleteSelection();
+        } else if (layers.length > 1) {
           const target = layers.find(l => l.id === activeLayerId);
           if (target && window.confirm(`"${target.name}" 레이어를 삭제할까요?`)) {
             handleDeleteLayer(activeLayerId);
           }
         }
+      } else if (selection && e.key.startsWith('Arrow')) {
+        // 선택 영역이 있을 때만 방향키로 영역과 픽셀을 함께 이동
+        e.preventDefault();
+        const step = e.shiftKey ? 8 : 1;
+        if (e.key === 'ArrowLeft') handleNudgeSelection(-step, 0);
+        else if (e.key === 'ArrowRight') handleNudgeSelection(step, 0);
+        else if (e.key === 'ArrowUp') handleNudgeSelection(0, -step);
+        else if (e.key === 'ArrowDown') handleNudgeSelection(0, step);
       } else if (e.key === '[') {
         setBrushSize(prev => Math.max(1, prev - 1));
       } else if (e.key === ']') {
@@ -310,13 +340,14 @@ export default function App() {
           case 'u': setCurrentTool('rect'); break;
           case 'c': setCurrentTool('circle'); break;
           case 'm': setCurrentTool('move'); break;
+          case 's': setCurrentTool('select'); break;
         }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleUndo, handleRedo, layers, activeLayerId]);
+  }, [handleUndo, handleRedo, layers, activeLayerId, selection, clipboard, dimensions]);
 
   // 레이어 픽셀 업데이트
   const handleUpdateLayerPixels = (
@@ -336,6 +367,90 @@ export default function App() {
       return layer;
     }));
   };
+
+  // --- 선택 영역 조작 ---
+
+  /** 편집 가능한(잠기지 않은) 활성 레이어를 반환. 없으면 null */
+  const getEditableActiveLayer = (): Layer | null => {
+    const layer = layers.find(l => l.id === activeLayerId);
+    if (!layer || layer.locked) return null;
+    return layer;
+  };
+
+  const handleCopySelection = () => {
+    const layer = layers.find(l => l.id === activeLayerId);
+    if (!layer || !selection) return;
+    setClipboard(copyRegion(layer.pixels, dimensions.width, selection));
+  };
+
+  const handleDeleteSelection = () => {
+    const layer = getEditableActiveLayer();
+    if (!layer || !selection) return;
+    handleUpdateLayerPixels(
+      layer.id,
+      clearRegion(layer.pixels, dimensions.width, selection),
+      true,
+      '선택 영역 지우기'
+    );
+  };
+
+  const handleCutSelection = () => {
+    const layer = getEditableActiveLayer();
+    if (!layer || !selection) return;
+    setClipboard(copyRegion(layer.pixels, dimensions.width, selection));
+    handleUpdateLayerPixels(
+      layer.id,
+      clearRegion(layer.pixels, dimensions.width, selection),
+      true,
+      '선택 영역 잘라내기'
+    );
+  };
+
+  const handlePasteClipboard = () => {
+    const layer = getEditableActiveLayer();
+    if (!layer || !clipboard) return;
+
+    // 선택 영역이 있으면 그 위치에, 없으면 캔버스 좌상단에 붙여넣는다
+    const destX = selection ? selection.x : 0;
+    const destY = selection ? selection.y : 0;
+
+    handleUpdateLayerPixels(
+      layer.id,
+      pasteRegion(layer.pixels, dimensions.width, dimensions.height, clipboard, destX, destY),
+      true,
+      '붙여넣기'
+    );
+
+    // 붙여넣은 영역을 그대로 선택 상태로 만들어 바로 이동할 수 있게 한다
+    setSelection({
+      x: destX,
+      y: destY,
+      width: Math.min(clipboard.width, dimensions.width - destX),
+      height: Math.min(clipboard.height, dimensions.height - destY),
+    });
+  };
+
+  /** 선택 영역과 그 안의 픽셀을 함께 이동 (방향키) */
+  const handleNudgeSelection = (dx: number, dy: number) => {
+    const layer = getEditableActiveLayer();
+    if (!layer || !selection) return;
+
+    const destX = Math.max(0, Math.min(dimensions.width - selection.width, selection.x + dx));
+    const destY = Math.max(0, Math.min(dimensions.height - selection.height, selection.y + dy));
+    if (destX === selection.x && destY === selection.y) return;
+
+    const lifted = copyRegion(layer.pixels, dimensions.width, selection);
+    const cleared = clearRegion(layer.pixels, dimensions.width, selection);
+    const moved = pasteRegion(cleared, dimensions.width, dimensions.height, lifted, destX, destY);
+
+    handleUpdateLayerPixels(layer.id, moved, true, '선택 영역 이동');
+    setSelection({ ...selection, x: destX, y: destY });
+  };
+
+  // 캔버스 크기가 바뀌면 기존 선택 영역은 범위를 벗어날 수 있으므로 해제한다
+  useEffect(() => {
+    setSelection(null);
+  }, [dimensions.width, dimensions.height]);
 
   // 레이어 추가
   const handleAddLayer = (groupId?: string | null) => {
@@ -677,9 +792,62 @@ export default function App() {
               onZoomChange={setZoom}
               onUpdateLayerPixels={handleUpdateLayerPixels}
               onPickColor={setPrimaryColor}
+              selection={selection}
+              onChangeSelection={setSelection}
               onionSkinEnabled={onionSkinEnabled}
               onionSkinPixels={onionSkinPixels}
             />
+
+            {/* 선택 영역 액션 바 (모바일에는 키보드 단축키가 없으므로 버튼으로도 제공) */}
+            {selection && (
+              <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 bg-[#111111]/95 backdrop-blur-md border border-gray-800 rounded-lg px-1.5 py-1 shadow-xl">
+                <span className="px-1.5 text-[10px] font-mono text-gray-400">
+                  {selection.width}×{selection.height}
+                </span>
+                <div className="w-px h-4 bg-gray-800" />
+                <button
+                  onClick={handleCopySelection}
+                  className="px-2 py-1 rounded text-[11px] text-gray-300 hover:text-white hover:bg-gray-800 transition-colors"
+                  title="선택 영역 복사 (Ctrl+C)"
+                >
+                  복사
+                </button>
+                <button
+                  onClick={handleCutSelection}
+                  className="px-2 py-1 rounded text-[11px] text-gray-300 hover:text-white hover:bg-gray-800 transition-colors"
+                  title="선택 영역 잘라내기 (Ctrl+X)"
+                >
+                  잘라내기
+                </button>
+                <button
+                  onClick={handlePasteClipboard}
+                  disabled={!clipboard}
+                  className={`px-2 py-1 rounded text-[11px] transition-colors ${
+                    clipboard
+                      ? 'text-gray-300 hover:text-white hover:bg-gray-800'
+                      : 'text-gray-600 cursor-not-allowed'
+                  }`}
+                  title={clipboard ? '붙여넣기 (Ctrl+V)' : '복사한 내용이 없습니다'}
+                >
+                  붙여넣기
+                </button>
+                <button
+                  onClick={handleDeleteSelection}
+                  className="px-2 py-1 rounded text-[11px] text-gray-300 hover:text-rose-400 hover:bg-rose-950/30 transition-colors"
+                  title="선택 영역 지우기 (Delete)"
+                >
+                  지우기
+                </button>
+                <div className="w-px h-4 bg-gray-800" />
+                <button
+                  onClick={() => setSelection(null)}
+                  className="p-1 rounded text-gray-500 hover:text-gray-200 hover:bg-gray-800 transition-colors"
+                  title="선택 해제 (Esc)"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
           </div>
 
           {/* 스프라이트 애니메이션 프레임 타임라인 */}
