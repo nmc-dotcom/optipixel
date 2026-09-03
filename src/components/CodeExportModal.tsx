@@ -53,7 +53,7 @@ export const CodeExportModal: React.FC<CodeExportModalProps> = ({
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 select-none">
       <div className="bg-[#111111] border border-gray-800 rounded-xl w-full max-w-3xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden text-gray-200">
         {/* 헤더 */}
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-gray-800 bg-[#161616]">
+        <div className="shrink-0 flex items-center justify-between px-5 py-3.5 border-b border-gray-800 bg-[#161616]">
           <div className="flex items-center gap-2">
             <Code2 className="w-4 h-4 text-emerald-400" />
             <h2 className="text-sm font-bold text-white">Export Pixel Art Source Code</h2>
@@ -67,7 +67,9 @@ export const CodeExportModal: React.FC<CodeExportModalProps> = ({
         </div>
 
         {/* 포맷 선택 탭 바 */}
-        <div className="flex border-b border-gray-800 px-5 pt-2 bg-[#161616]/60 gap-2 overflow-x-auto">
+        {/* shrink-0 필수: overflow-x-auto가 걸린 flex 자식은 세로로 압축되면
+            내용이 삐져나오지 못하고 잘려서 탭 글자 윗부분이 사라진다 */}
+        <div className="shrink-0 flex border-b border-gray-800 px-5 pt-2 bg-[#161616]/60 gap-2 overflow-x-auto">
           {formats.map(fmt => (
             <button
               key={fmt.id}
@@ -117,7 +119,7 @@ export const CodeExportModal: React.FC<CodeExportModalProps> = ({
         </div>
 
         {/* 푸터 */}
-        <div className="px-5 py-3 bg-[#161616] border-t border-gray-800 flex items-center justify-end">
+        <div className="shrink-0 px-5 py-3 bg-[#161616] border-t border-gray-800 flex items-center justify-end">
           <button
             onClick={onClose}
             className="px-4 py-1.5 rounded text-xs font-semibold text-gray-300 hover:bg-gray-800 transition-colors"

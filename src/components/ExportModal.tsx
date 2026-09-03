@@ -201,7 +201,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 select-none">
       <div className="bg-[#111111] border border-gray-800 rounded-xl w-full max-w-3xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden text-gray-200">
         {/* 헤더 */}
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-gray-800 bg-[#161616]">
+        <div className="shrink-0 flex items-center justify-between px-5 py-3.5 border-b border-gray-800 bg-[#161616]">
           <div className="flex items-center gap-2">
             <Download className="w-4 h-4 text-emerald-400" />
             <h2 className="text-sm font-bold text-white">Export Image & Sprite Sheet</h2>
@@ -215,7 +215,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         </div>
 
         {/* 탭 네비게이션 */}
-        <div className="flex border-b border-gray-800 px-5 pt-2 bg-[#161616]/60 gap-2">
+        <div className="shrink-0 flex border-b border-gray-800 px-5 pt-2 bg-[#161616]/60 gap-2">
           <button
             onClick={() => setActiveTab('stripe')}
             className={`pb-2.5 px-3 text-xs font-semibold border-b-2 transition-all flex items-center gap-1.5 ${

@@ -142,7 +142,7 @@ export const ImageToPixelModal: React.FC<ImageToPixelModalProps> = ({
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 select-none">
       <div className="bg-[#111111] border border-gray-800 rounded-xl w-full max-w-4xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden text-gray-200">
         {/* 모달 헤더 */}
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-gray-800 bg-[#161616]">
+        <div className="shrink-0 flex items-center justify-between px-5 py-3.5 border-b border-gray-800 bg-[#161616]">
           <div className="flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-emerald-400" />
             <h2 className="text-sm font-bold text-white">Image to Pixel Art Conversion</h2>
@@ -470,7 +470,7 @@ export const ImageToPixelModal: React.FC<ImageToPixelModalProps> = ({
         </div>
 
         {/* 모달 푸터 액션 */}
-        <div className="px-6 py-3.5 bg-[#161616] border-t border-gray-800 flex items-center justify-end gap-3">
+        <div className="shrink-0 px-6 py-3.5 bg-[#161616] border-t border-gray-800 flex items-center justify-end gap-3">
           <button
             onClick={onClose}
             className="px-3.5 py-1.5 rounded text-xs font-semibold text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
