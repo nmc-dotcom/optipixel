@@ -9,7 +9,9 @@ import {
   filterInvert, 
   filterRotate90,
   filterRotateAngle,
-  filterShift 
+  filterShift,
+  removeBackgroundFromEdges,
+  removeColorGlobally
 } from '../utils/filterEngine';
 import { 
   SlidersHorizontal, 
@@ -28,7 +30,8 @@ import {
   ChevronUp,
   Maximize2,
   Contrast,
-  Droplet
+  Droplet,
+  Eraser
 } from 'lucide-react';
 
 interface FiltersModalProps {
@@ -75,6 +78,9 @@ export const FiltersModal: React.FC<FiltersModalProps> = ({
   // 현재 그리기 색(primaryColor)을 기본값으로 쓰면, 방금 그 색으로 그린 그림에
   // 같은 색 외곽선이 생겨 "아무 일도 일어나지 않은 것처럼" 보이므로 어두운 색을 기본으로 둔다.
   const [outlineColor, setOutlineColor] = useState('#0f172a');
+
+  // 배경 제거 허용 오차. 디더링된 배경(색상 거리 30~50)을 한 번에 잡도록 20%를 기본으로 둔다.
+  const [bgTolerance, setBgTolerance] = useState(20);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [activeTab, setActiveTab] = useState<'tone' | 'effects' | 'geometry'>('geometry');
 
@@ -513,9 +519,71 @@ export const FiltersModal: React.FC<FiltersModalProps> = ({
               </div>
             )}
 
-            {/* TAB 2: 도트 외곽선 (Outline) 생성 */}
+            {/* TAB 2: 배경 제거 & 도트 외곽선 생성 */}
             {activeTab === 'effects' && (
               <div className="flex flex-col gap-3">
+                {/* 배경 제거 — 외곽선은 투명 픽셀에만 그려지므로 보통 이 작업이 먼저다 */}
+                <div className="bg-[#181818] border border-gray-800 p-3 rounded-lg flex flex-col gap-2.5">
+                  <div className="flex items-center gap-1.5">
+                    <Eraser className="w-4 h-4 text-emerald-400" />
+                    <span className="text-xs font-bold text-gray-200">배경 지우기</span>
+                  </div>
+
+                  <p className="text-[11px] text-gray-400 leading-relaxed">
+                    사진을 변환하면 배경이 불투명하게 채워져 외곽선을 그릴 자리가 없습니다.
+                    배경을 먼저 지워 투명하게 만드세요.
+                  </p>
+
+                  <div>
+                    <div className="flex justify-between text-[10px] font-mono uppercase text-gray-400 mb-1">
+                      <span>허용 오차</span>
+                      <span className="text-emerald-400">{bgTolerance}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={bgTolerance}
+                      onChange={(e) => setBgTolerance(Number(e.target.value))}
+                      className="w-full accent-emerald-500 h-1.5 bg-gray-800 rounded cursor-pointer"
+                      title="값이 클수록 배경과 비슷한 색까지 함께 지웁니다. 디더링된 배경은 15~30% 정도가 적당합니다."
+                    />
+                  </div>
+
+                  <button
+                    onClick={() =>
+                      handleInstantEffect(
+                        (pxs) => removeBackgroundFromEdges(pxs, width, height, bgTolerance),
+                        '가장자리 배경 제거'
+                      )
+                    }
+                    className="w-full py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-semibold shadow-sm transition-colors flex items-center justify-center gap-1.5"
+                    title="캔버스 가장자리에 닿아 있는 배경만 지웁니다. 피사체 안쪽의 같은 색은 남습니다."
+                  >
+                    <Eraser className="w-3.5 h-3.5" />
+                    <span>가장자리 배경 자동 지우기</span>
+                  </button>
+
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() =>
+                        handleInstantEffect(
+                          (pxs) => removeColorGlobally(pxs, primaryColor, bgTolerance),
+                          '선택 색상 제거'
+                        )
+                      }
+                      className="flex-1 py-1.5 bg-[#222222] hover:bg-gray-700 text-gray-200 rounded text-xs font-semibold transition-colors flex items-center justify-center gap-1.5"
+                      title="위치와 상관없이 이 색과 비슷한 픽셀을 전부 지웁니다. 스포이트(I)로 배경색을 찍은 뒤 사용하세요."
+                    >
+                      <span
+                        className="w-3 h-3 rounded-sm border border-white/30 shrink-0"
+                        style={{ backgroundColor: primaryColor }}
+                      />
+                      <span>현재 색 전부 지우기</span>
+                    </button>
+                  </div>
+                </div>
+
                 <div className="bg-[#181818] border border-gray-800 p-3 rounded-lg flex flex-col gap-2.5">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-1.5">

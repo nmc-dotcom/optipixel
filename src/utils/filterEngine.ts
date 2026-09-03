@@ -1,4 +1,118 @@
-import { hexToRgba, RGBA, rgbaToHex } from './pixelEngine';
+import { colorDistance, hexToRgba, RGBA, rgbaToHex } from './pixelEngine';
+
+/**
+ * 배경 제거의 허용 오차(0~100%)를 실제 색상 거리로 변환한다.
+ * Redmean 거리의 최대치는 765(검정↔흰색)지만, 실측하면 안티앨리어싱은 15,
+ * 디더링은 30~50, 배경과 피사체의 차이는 170 이상이다.
+ * 슬라이더를 0~300 구간에 대응시켜야 실제로 쓸 만한 해상도가 나온다.
+ */
+const MAX_TOLERANCE_DISTANCE = 300;
+
+function toleranceToDistance(tolerance: number): number {
+  return (Math.max(0, Math.min(100, tolerance)) / 100) * MAX_TOLERANCE_DISTANCE;
+}
+
+/**
+ * 캔버스 가장자리에 닿아 있는 배경을 제거한다.
+ * 가장자리 픽셀들의 색을 배경 표본으로 삼아, 거기서부터 이어진 영역 중
+ * 허용 오차 안에 드는 픽셀만 투명하게 만든다.
+ * 피사체 안쪽에 우연히 배경과 같은 색이 있어도 가장자리와 이어져 있지 않으면 남는다.
+ */
+export function removeBackgroundFromEdges(
+  pixels: string[],
+  width: number,
+  height: number,
+  tolerance: number
+): string[] {
+  if (width <= 0 || height <= 0) return [...pixels];
+
+  const maxDistance = toleranceToDistance(tolerance);
+
+  // 1. 가장자리 색상을 빈도순으로 모아 배경 기준색으로 삼는다.
+  //    (사진 변환 결과처럼 가장자리 색이 많을 때를 대비해 상위 64개로 제한)
+  const borderCounts = new Map<string, number>();
+  const addBorder = (x: number, y: number) => {
+    const color = pixels[y * width + x];
+    if (!color) return; // 이미 투명한 곳은 기준색이 필요 없다
+    borderCounts.set(color, (borderCounts.get(color) || 0) + 1);
+  };
+  for (let x = 0; x < width; x++) {
+    addBorder(x, 0);
+    addBorder(x, height - 1);
+  }
+  for (let y = 0; y < height; y++) {
+    addBorder(0, y);
+    addBorder(width - 1, y);
+  }
+
+  const references: RGBA[] = [...borderCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 64)
+    .map(([color]) => hexToRgba(color));
+
+  const isBackgroundColor = (color: string): boolean => {
+    if (!color) return true; // 이미 투명한 픽셀은 배경으로 취급해 탐색이 이어지게 한다
+    if (references.length === 0) return false;
+    const rgba = hexToRgba(color);
+    return references.some(ref => colorDistance(rgba, ref) <= maxDistance);
+  };
+
+  // 2. 가장자리에서 시작해 배경으로 판정되는 픽셀만 따라가며 확장 (4방향)
+  const result = [...pixels];
+  const visited = new Uint8Array(width * height);
+  const stack: number[] = [];
+
+  const push = (x: number, y: number) => {
+    const idx = y * width + x;
+    if (visited[idx]) return;
+    visited[idx] = 1;
+    if (!isBackgroundColor(pixels[idx])) return;
+    stack.push(idx);
+  };
+
+  for (let x = 0; x < width; x++) {
+    push(x, 0);
+    push(x, height - 1);
+  }
+  for (let y = 0; y < height; y++) {
+    push(0, y);
+    push(width - 1, y);
+  }
+
+  while (stack.length > 0) {
+    const idx = stack.pop()!;
+    result[idx] = '';
+
+    const x = idx % width;
+    const y = (idx - x) / width;
+    if (x > 0) push(x - 1, y);
+    if (x < width - 1) push(x + 1, y);
+    if (y > 0) push(x, y - 1);
+    if (y < height - 1) push(x, y + 1);
+  }
+
+  return result;
+}
+
+/**
+ * 지정한 색과 허용 오차 안에 드는 픽셀을 위치와 무관하게 모두 제거한다.
+ * 배경이 피사체에 가려 여러 조각으로 나뉘어 있을 때 사용한다.
+ */
+export function removeColorGlobally(
+  pixels: string[],
+  targetColor: string,
+  tolerance: number
+): string[] {
+  if (!targetColor) return [...pixels];
+
+  const maxDistance = toleranceToDistance(tolerance);
+  const target = hexToRgba(targetColor);
+
+  return pixels.map(color => {
+    if (!color) return '';
+    return colorDistance(hexToRgba(color), target) <= maxDistance ? '' : color;
+  });
+}
 
 /**
  * 레이어 픽셀에 색상 반전 적용
