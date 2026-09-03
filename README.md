@@ -40,3 +40,14 @@ Vite로 만들어졌으며, 이미지 도트 변환부터 레이어 편집, 애�
 - `npm run build` — 프로덕션 빌드
 - `npm run preview` — 빌드 결과 로컬 미리보기
 - `npm run lint` — TypeScript 타입 체크
+- `npm test` — 테스트 실행 (`npm run test:watch`로 감시 모드)
+
+## 테스트
+
+픽셀 좌표 계산, 프로젝트 직렬화, 외부 입력 파싱처럼 조용히 틀리기 쉬운 순수 함수를
+[vitest](https://vitest.dev)로 검증합니다.
+
+- `src/utils/pixelEngine.test.ts` — 선택 영역 좌표 연산(역방향 드래그, 경계 클램프,
+  붙여넣기 잘림)과 색상 변환
+- `src/utils/projectStorage.test.ts` — 프로젝트 RLE 압축 왕복, 손상된 파일 방어
+- `src/utils/lospec.test.ts` — Lospec 슬러그 파싱과 팔레트 변환

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { PalettePreset } from '../types';
 import { DEFAULT_PALETTES } from '../constants/presets';
+import { LOSPEC_PALETTE_URL, parseLospecSlug, toPaletteFromLospec } from '../utils/lospec';
 import { Plus, Trash2, FolderPlus, Download, Upload, Check, Globe, Loader2 } from 'lucide-react';
 
 interface ColorPalettePanelProps {
@@ -116,18 +117,8 @@ export const ColorPalettePanel: React.FC<ColorPalettePanelProps> = ({
    * 슬러그("pico-8")와 전체 URL 양쪽 모두 받아들인다.
    */
   const handleFetchLospecPalette = async () => {
-    const raw = lospecQuery.trim();
-    if (!raw) return;
-
-    // URL을 붙여넣어도 되도록 마지막 경로 조각만 슬러그로 사용
-    const slug = raw
-      .replace(/^https?:\/\/(www\.)?lospec\.com\/palette-list\//i, '')
-      .replace(/\.(json|csv)$/i, '')
-      .replace(/[/?#].*$/, '')
-      .trim()
-      .toLowerCase();
-
-    if (!/^[a-z0-9-]+$/.test(slug)) {
+    const slug = parseLospecSlug(lospecQuery);
+    if (!slug) {
       setLospecError('올바른 팔레트 이름(슬러그) 또는 주소가 아닙니다.');
       return;
     }
@@ -136,7 +127,7 @@ export const ColorPalettePanel: React.FC<ColorPalettePanelProps> = ({
     setLospecError(null);
 
     try {
-      const res = await fetch(`https://lospec.com/palette-list/${slug}.json`);
+      const res = await fetch(LOSPEC_PALETTE_URL(slug));
       if (!res.ok) {
         setLospecError(
           res.status === 404
@@ -146,26 +137,11 @@ export const ColorPalettePanel: React.FC<ColorPalettePanelProps> = ({
         return;
       }
 
-      const data = await res.json();
-      // Lospec은 색상을 "#" 없이 반환하므로 붙여준다
-      const colors: string[] = Array.isArray(data?.colors)
-        ? data.colors
-            .filter((c: unknown): c is string => typeof c === 'string')
-            .map((c: string) => (c.startsWith('#') ? c : `#${c}`))
-            .filter((c: string) => HEX_COLOR_RE.test(c))
-        : [];
-
-      if (colors.length === 0) {
+      const imported = toPaletteFromLospec(await res.json(), slug);
+      if (!imported) {
         setLospecError('팔레트에 유효한 색상이 없습니다.');
         return;
       }
-
-      const imported: PalettePreset = {
-        id: `custom-lospec-${slug}-${Date.now()}`,
-        name: typeof data?.name === 'string' && data.name.trim() ? data.name : slug,
-        category: 'custom',
-        colors,
-      };
 
       onSaveCustomPalette(imported);
       onChangePalette(imported);
