@@ -30,7 +30,7 @@ export const ImageToPixelModal: React.FC<ImageToPixelModalProps> = ({
     targetHeight: currentHeight,
     fitMode: 'fit',
     colorCount: 16,
-    useCurrentPalette: true,
+    useCurrentPalette: false,
     dither: 'atkinson',
     brightness: 0,
     contrast: 15,
@@ -302,14 +302,22 @@ export const ImageToPixelModal: React.FC<ImageToPixelModalProps> = ({
 
             {/* 고급 필터 옵션: 엣지 보존 & 노이즈 정리 */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <label className="flex items-center gap-2 p-2 bg-[#161616] rounded-lg border border-gray-800 cursor-pointer">
+              <label
+                className="flex items-start gap-2 p-2 bg-[#161616] rounded-lg border border-gray-800 cursor-pointer"
+                title="켜면 Color Count 설정을 무시하고 왼쪽 팔레트 패널의 현재 팔레트 색상에만 강제로 매핑합니다. 특정 게임/레트로 팔레트에 정확히 맞추고 싶을 때만 사용하세요 — 일반 사진에는 색이 심하게 뭉개질 수 있습니다."
+              >
                 <input
                   type="checkbox"
                   checked={settings.useCurrentPalette}
                   onChange={(e) => setSettings(s => ({ ...s, useCurrentPalette: e.target.checked }))}
-                  className="accent-emerald-500 rounded"
+                  className="accent-emerald-500 rounded mt-0.5"
                 />
-                <span className="text-xs text-gray-300">에디터 팔레트 강제 맵핑</span>
+                <span className="flex flex-col">
+                  <span className="text-xs text-gray-300">에디터 팔레트 강제 맵핑</span>
+                  <span className="text-[10px] text-gray-500 leading-snug">
+                    Color Count 무시, 현재 팔레트 색상으로만 변환 (특정 팔레트에 맞출 때만 사용)
+                  </span>
+                </span>
               </label>
 
               <label className="flex items-center gap-2 p-2 bg-[#161616] rounded-lg border border-gray-800 cursor-pointer">
