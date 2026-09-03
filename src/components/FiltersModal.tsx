@@ -9,9 +9,7 @@ import {
   filterInvert, 
   filterRotate90,
   filterRotateAngle,
-  filterShift,
-  removeBackgroundFromEdges,
-  removeColorGlobally
+  filterShift
 } from '../utils/filterEngine';
 import { 
   SlidersHorizontal, 
@@ -30,8 +28,7 @@ import {
   ChevronUp,
   Maximize2,
   Contrast,
-  Droplet,
-  Eraser
+  Droplet
 } from 'lucide-react';
 
 interface FiltersModalProps {
@@ -78,9 +75,6 @@ export const FiltersModal: React.FC<FiltersModalProps> = ({
   // 현재 그리기 색(primaryColor)을 기본값으로 쓰면, 방금 그 색으로 그린 그림에
   // 같은 색 외곽선이 생겨 "아무 일도 일어나지 않은 것처럼" 보이므로 어두운 색을 기본으로 둔다.
   const [outlineColor, setOutlineColor] = useState('#0f172a');
-
-  // 배경 제거 허용 오차. 디더링된 배경(색상 거리 30~50)을 한 번에 잡도록 20%를 기본으로 둔다.
-  const [bgTolerance, setBgTolerance] = useState(20);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [activeTab, setActiveTab] = useState<'tone' | 'effects' | 'geometry'>('geometry');
 
@@ -203,36 +197,6 @@ export const FiltersModal: React.FC<FiltersModalProps> = ({
     // 슬라이더와 달리 이 효과들은 되돌릴 수 없는 확정 편집이므로 히스토리에 기록한다.
     // (미리보기로만 반영하면 Ctrl+Z로 취소할 수 없고, 백업까지 덮어써서 '취소하고 닫기'로도 되돌릴 수 없다)
     onApplyLayerFilter(updatedLayers, desc);
-  };
-
-  /**
-   * 가장자리 배경 제거.
-   * 배경과 피사체가 같은 색으로 양자화되었거나 피사체가 가장자리를 크게 덮고 있으면
-   * 그림 전체가 사라질 수 있다. 그런 경우 말없이 지워버리지 않고 먼저 알린다.
-   */
-  const handleRemoveEdgeBackground = () => {
-    const activeLayer = layers.find(l => l.id === activeLayerId);
-    if (activeLayer) {
-      const before = activeLayer.pixels.filter(c => c !== '').length;
-      const after = removeBackgroundFromEdges(activeLayer.pixels, width, height, bgTolerance)
-        .filter(c => c !== '').length;
-
-      if (before > 0 && after / before < 0.1) {
-        const removedPercent = Math.round((1 - after / before) * 100);
-        const proceed = window.confirm(
-          `이 설정으로는 그림의 ${removedPercent}%가 지워집니다.\n\n` +
-          '배경과 피사체가 같은 색이거나, 피사체가 캔버스 가장자리에 넓게 닿아 있을 때 발생합니다.\n' +
-          '허용 오차를 낮추거나, 마술봉(W)으로 배경을 직접 클릭해 지우는 방법을 권합니다.\n\n' +
-          '그래도 진행할까요?'
-        );
-        if (!proceed) return;
-      }
-    }
-
-    handleInstantEffect(
-      (pxs) => removeBackgroundFromEdges(pxs, width, height, bgTolerance),
-      '가장자리 배경 제거'
-    );
   };
 
   // 취소 시: 열리기 전 원래 백업으로 롤백 후 닫기
@@ -549,69 +513,9 @@ export const FiltersModal: React.FC<FiltersModalProps> = ({
               </div>
             )}
 
-            {/* TAB 2: 배경 제거 & 도트 외곽선 생성 */}
+            {/* TAB 2: 도트 외곽선 (Outline) 생성 */}
             {activeTab === 'effects' && (
               <div className="flex flex-col gap-3">
-                {/* 배경 제거 — 외곽선은 투명 픽셀에만 그려지므로 보통 이 작업이 먼저다 */}
-                <div className="bg-[#181818] border border-gray-800 p-3 rounded-lg flex flex-col gap-2.5">
-                  <div className="flex items-center gap-1.5">
-                    <Eraser className="w-4 h-4 text-emerald-400" />
-                    <span className="text-xs font-bold text-gray-200">배경 지우기</span>
-                  </div>
-
-                  <p className="text-[11px] text-gray-400 leading-relaxed">
-                    사진을 변환하면 배경이 불투명하게 채워져 외곽선을 그릴 자리가 없습니다.
-                    배경을 먼저 지워 투명하게 만드세요.
-                    <span className="block mt-1 text-gray-500">
-                      인물이 화면을 가득 채워 가장자리에 닿아 있으면 마술봉(W)으로 배경을 직접 클릭하는 편이 정확합니다.
-                    </span>
-                  </p>
-
-                  <div>
-                    <div className="flex justify-between text-[10px] font-mono uppercase text-gray-400 mb-1">
-                      <span>허용 오차</span>
-                      <span className="text-emerald-400">{bgTolerance}%</span>
-                    </div>
-                    <input
-                      type="range"
-                      min={0}
-                      max={100}
-                      value={bgTolerance}
-                      onChange={(e) => setBgTolerance(Number(e.target.value))}
-                      className="w-full accent-emerald-500 h-1.5 bg-gray-800 rounded cursor-pointer"
-                      title="값이 클수록 배경과 비슷한 색까지 함께 지웁니다. 디더링된 배경은 15~30% 정도가 적당합니다."
-                    />
-                  </div>
-
-                  <button
-                    onClick={handleRemoveEdgeBackground}
-                    className="w-full py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-semibold shadow-sm transition-colors flex items-center justify-center gap-1.5"
-                    title="캔버스 가장자리에 닿아 있는 배경만 지웁니다. 피사체 안쪽의 같은 색은 남습니다."
-                  >
-                    <Eraser className="w-3.5 h-3.5" />
-                    <span>가장자리 배경 자동 지우기</span>
-                  </button>
-
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      onClick={() =>
-                        handleInstantEffect(
-                          (pxs) => removeColorGlobally(pxs, primaryColor, bgTolerance),
-                          '선택 색상 제거'
-                        )
-                      }
-                      className="flex-1 py-1.5 bg-[#222222] hover:bg-gray-700 text-gray-200 rounded text-xs font-semibold transition-colors flex items-center justify-center gap-1.5"
-                      title="위치와 상관없이 이 색과 비슷한 픽셀을 전부 지웁니다. 스포이트(I)로 배경색을 찍은 뒤 사용하세요."
-                    >
-                      <span
-                        className="w-3 h-3 rounded-sm border border-white/30 shrink-0"
-                        style={{ backgroundColor: primaryColor }}
-                      />
-                      <span>현재 색 전부 지우기</span>
-                    </button>
-                  </div>
-                </div>
-
                 <div className="bg-[#181818] border border-gray-800 p-3 rounded-lg flex flex-col gap-2.5">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-1.5">
@@ -639,6 +543,9 @@ export const FiltersModal: React.FC<FiltersModalProps> = ({
 
                   <p className="text-[11px] text-gray-400 leading-relaxed">
                     스프라이트 주변 경계면에 1px 정밀 도트 외곽선을 입혀 캐릭터 및 오브젝트의 시인성을 높입니다.
+                    <span className="block mt-1 text-gray-500">
+                      외곽선은 투명한 픽셀에만 그려집니다. 배경이 채워져 있다면 마술봉(W)으로 먼저 지워주세요.
+                    </span>
                   </p>
 
                   <button

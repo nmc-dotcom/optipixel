@@ -381,10 +381,17 @@ export function blendPixelArrays(
 }
 
 /**
+ * 허용 오차 100%에 해당하는 색상 거리.
+ * Redmean 거리의 최대치는 765(검정↔흰색)지만, 실측하면 안티앨리어싱은 15,
+ * 디더링은 30~50, 배경과 피사체의 차이는 170 이상이다.
+ * 0~300 구간에 대응시켜야 슬라이더가 실제로 쓸 만한 해상도를 갖는다.
+ */
+const MAX_WAND_DISTANCE = 300;
+
+/**
  * 클릭한 지점과 이어진 비슷한 색 영역을 지운다 (마술봉 지우개).
- * 가장자리 자동 제거와 달리 사용자가 직접 배경을 지목하므로,
- * 피사체가 캔버스 가장자리에 닿아 있어도 안전하다.
- * tolerance는 0~100이며 removeBackgroundFromEdges와 같은 척도를 쓴다.
+ * 사용자가 직접 배경을 지목하므로, 피사체가 캔버스 가장자리에 닿아 있어도 안전하다.
+ * tolerance는 0~100.
  */
 export function magicWandErase(
   pixels: string[],
@@ -399,7 +406,7 @@ export function magicWandErase(
   const startColor = pixels[startY * width + startX] || '';
   if (!startColor) return pixels; // 이미 투명한 곳을 클릭하면 할 일이 없다
 
-  const maxDistance = (Math.max(0, Math.min(100, tolerance)) / 100) * 300;
+  const maxDistance = (Math.max(0, Math.min(100, tolerance)) / 100) * MAX_WAND_DISTANCE;
   const target = hexToRgba(startColor);
 
   const result = [...pixels];

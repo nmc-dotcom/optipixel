@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { clearRegion, copyRegion, hexToRgba, normalizeSelection, pasteRegion } from './pixelEngine';
+import {
+  clearRegion,
+  copyRegion,
+  hexToRgba,
+  magicWandErase,
+  normalizeSelection,
+  pasteRegion,
+} from './pixelEngine';
 
 /** 4x4 캔버스. 각 칸에 자기 인덱스를 색상처럼 넣어 어느 좌표에서 왔는지 추적한다. */
 const W = 4;
@@ -109,5 +116,86 @@ describe('hexToRgba', () => {
   it('캐시된 결과를 반환해도 값이 동일하다', () => {
     // 캐시는 같은 객체를 공유하므로, 호출자가 변형하지 않는 한 값이 같아야 한다
     expect(hexToRgba('#abcdef')).toEqual(hexToRgba('#abcdef'));
+  });
+});
+
+const SKY = '#87ceeb';
+const SKY_DITHER = '#7ec4e0'; // 하늘과 거리 30 (디더링 수준)
+const BODY = '#f5c9a0'; // 하늘과 거리가 먼 피사체 색
+
+/** 격자 문자열을 픽셀 배열로 (. = 투명) */
+function parse(rows: string[], map: Record<string, string>): string[] {
+  return rows.flatMap(row => [...row].map(ch => (ch === '.' ? '' : map[ch])));
+}
+
+function renderGrid(pixels: string[], w: number, h: number, map: Record<string, string>): string {
+  const reverse = new Map(Object.entries(map).map(([k, v]) => [v, k]));
+  return Array.from({ length: h }, (_, y) =>
+    Array.from({ length: w }, (_, x) => {
+      const c = pixels[y * w + x];
+      return c === '' ? '.' : reverse.get(c) ?? '?';
+    }).join('')
+  ).join('\n');
+}
+
+describe('magicWandErase', () => {
+  const map = { S: SKY, s: SKY_DITHER, B: BODY };
+
+  it('클릭한 지점과 이어진 같은 색 영역만 지운다', () => {
+    const rows = ['SSSSS', 'SSBSS', 'SBBBS', 'SSBSS', 'SSSSS'];
+    const out = magicWandErase(parse(rows, map), 5, 5, 0, 0, 10);
+
+    expect(renderGrid(out, 5, 5, map)).toBe(['.....', '..B..', '.BBB.', '..B..', '.....'].join('\n'));
+  });
+
+  it('피사체가 가장자리에 닿아 있어도 안전하다 (자동 제거와 달리 사용자가 배경을 직접 지목)', () => {
+    // 피사체 B가 왼쪽 가장자리에 걸쳐 있는 상황.
+    // 배경(3,0)을 클릭하면 배경만 사라지고 피사체는 온전히 남는다.
+    const rows = ['SSSSS', 'BBSSS', 'BBSSS', 'SSSSS'];
+    const out = magicWandErase(parse(rows, map), 5, 4, 3, 0, 10);
+
+    expect(out.filter(c => c === BODY)).toHaveLength(4);
+    expect(out.filter(c => c === SKY)).toHaveLength(0);
+  });
+
+  it('허용 오차 안의 비슷한 색까지 이어서 지운다', () => {
+    const rows = ['SsSsS', 'sSBSs', 'SBBBS'];
+    const out = magicWandErase(parse(rows, map), 5, 3, 0, 0, 20);
+
+    expect(out.filter(c => c === SKY || c === SKY_DITHER)).toHaveLength(0);
+    expect(out.filter(c => c === BODY)).toHaveLength(4);
+  });
+
+  it('허용 오차가 0이면 정확히 같은 색만 따라간다', () => {
+    const rows = ['SsS', 'SSS'];
+    const out = magicWandErase(parse(rows, map), 3, 2, 0, 0, 0);
+
+    // 클릭한 S와 정확히 같은 색만 사라지고, 사이에 낀 s는 남는다
+    expect(out.filter(c => c === SKY_DITHER)).toHaveLength(1);
+  });
+
+  it('떨어져 있는 같은 색은 건드리지 않는다', () => {
+    // 왼쪽 S 덩어리와 오른쪽 S 덩어리가 피사체로 완전히 분리되어 있다
+    const rows = ['SBS', 'SBS', 'SBS'];
+    const out = magicWandErase(parse(rows, map), 3, 3, 0, 0, 10);
+
+    expect(renderGrid(out, 3, 3, map)).toBe(['.BS', '.BS', '.BS'].join('\n'));
+  });
+
+  it('이미 투명한 곳을 클릭하면 아무 일도 하지 않는다', () => {
+    const pixels = ['', BODY, ''];
+    expect(magicWandErase(pixels, 3, 1, 0, 0, 20)).toEqual(pixels);
+  });
+
+  it('캔버스 밖 좌표는 무시한다', () => {
+    const pixels = [SKY, SKY, SKY, SKY];
+    expect(magicWandErase(pixels, 2, 2, 5, 5, 20)).toEqual(pixels);
+    expect(magicWandErase(pixels, 2, 2, -1, 0, 20)).toEqual(pixels);
+  });
+
+  it('원본 배열을 변경하지 않는다', () => {
+    const input = parse(['SS', 'SS'], map);
+    magicWandErase(input, 2, 2, 0, 0, 10);
+    expect(input.filter(c => c === SKY)).toHaveLength(4);
   });
 });
