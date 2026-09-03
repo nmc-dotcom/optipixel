@@ -7,13 +7,25 @@ export interface RGBA {
   a: number;
 }
 
+const TRANSPARENT: RGBA = { r: 0, g: 0, b: 0, a: 0 };
+
+// hex 문자열 파싱 결과 캐시.
+// 캔버스 합성은 매 프레임 (레이어 수 × 픽셀 수)만큼 이 함수를 호출하지만
+// 실제 등장하는 색상 종류는 보통 수십 개뿐이라 캐시 적중률이 사실상 100%다.
+const hexCache = new Map<string, RGBA>();
+const HEX_CACHE_LIMIT = 4096;
+
 /**
- * 16진수 색상 코드를 RGBA 객체로 변환
+ * 16진수 색상 코드를 RGBA 객체로 변환.
+ * 반환 객체는 캐시에서 공유되므로 **변형하지 말 것** (읽기 전용으로만 사용).
  */
 export function hexToRgba(hex: string): RGBA {
   if (!hex || hex === 'transparent') {
-    return { r: 0, g: 0, b: 0, a: 0 };
+    return TRANSPARENT;
   }
+
+  const cached = hexCache.get(hex);
+  if (cached) return cached;
 
   let cleanHex = hex.replace('#', '');
   if (cleanHex.length === 3) {
@@ -24,15 +36,21 @@ export function hexToRgba(hex: string): RGBA {
 
   const num = parseInt(cleanHex, 16);
   if (isNaN(num)) {
-    return { r: 0, g: 0, b: 0, a: 0 };
+    return TRANSPARENT;
   }
 
-  return {
+  const parsed: RGBA = {
     r: (num >> 24) & 255,
     g: (num >> 16) & 255,
     b: (num >> 8) & 255,
     a: (num & 255) / 255,
   };
+
+  // 비정상적으로 많은 색상이 들어와도 메모리가 무한정 늘지 않도록 상한을 둔다
+  if (hexCache.size >= HEX_CACHE_LIMIT) hexCache.clear();
+  hexCache.set(hex, parsed);
+
+  return parsed;
 }
 
 /**
@@ -252,6 +270,24 @@ export function getBrushStamp(centerX: number, centerY: number, size: number): {
   return points;
 }
 
+// ImageData 생성을 위한 재사용 캔버스.
+// 합성은 드로잉 중 매 프레임 호출되므로, 호출마다 캔버스 엘리먼트를 새로 만들면
+// 불필요한 DOM 할당과 GC 부담이 생긴다.
+let scratchCanvas: HTMLCanvasElement | null = null;
+let scratchCtx: CanvasRenderingContext2D | null = null;
+
+function getScratchContext(width: number, height: number): CanvasRenderingContext2D {
+  if (!scratchCanvas || !scratchCtx) {
+    scratchCanvas = document.createElement('canvas');
+    scratchCtx = scratchCanvas.getContext('2d')!;
+  }
+  if (scratchCanvas.width !== width || scratchCanvas.height !== height) {
+    scratchCanvas.width = width;
+    scratchCanvas.height = height;
+  }
+  return scratchCtx;
+}
+
 /**
  * 여러 레이어를 결합하여 합성 ImageData 생성
  */
@@ -264,11 +300,7 @@ export function compositeLayers(
   const groupVisibilityMap = new Map<string, boolean>();
   groups.forEach(g => groupVisibilityMap.set(g.id, g.visible));
 
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext('2d')!;
-  const imgData = ctx.createImageData(width, height);
+  const imgData = getScratchContext(width, height).createImageData(width, height);
   const data = imgData.data;
 
   // 레이어는 배열 순서대로 아래에서 위로 합성

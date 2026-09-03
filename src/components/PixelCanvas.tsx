@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { Layer, LayerGroup, ToolType } from '../types';
 import { 
   compositeLayers, 
@@ -145,6 +145,18 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
     return { x: px, y: py };
   }, [panOffset, zoom, width, height]);
 
+  // 레이어 합성 결과 캐시.
+  // 합성은 (레이어 수 × 픽셀 수)만큼 알파 블렌딩을 도는 가장 비싼 연산인데,
+  // 커서 이동·패닝·줌처럼 그림 내용이 그대로인 상황에서도 매번 다시 계산되고 있었다.
+  // 실제로 레이어/그룹/크기가 바뀔 때만 재합성한다.
+  const baseComposite = useMemo(
+    () => compositeLayers(layers, groups, width, height),
+    [layers, groups, width, height]
+  );
+
+  // 1:1 픽셀을 확대 전송하기 위한 임시 캔버스 (매 프레임 새로 만들지 않고 재사용)
+  const tempCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
   // 렌더 루프
   const render = useCallback(() => {
     const canvas = canvasRef.current;
@@ -164,11 +176,19 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
     ctx.imageSmoothingEnabled = false;
     ctx.clearRect(0, 0, displayW, displayH);
 
-    // 1. 기본 레이어 합성
-    const compositeData = compositeLayers(layers, groups, width, height);
+    // 1. 캐시된 합성 결과 사용.
+    // 어니언 스킨/도형 미리보기는 픽셀을 덮어써야 하므로, 그런 경우에만 복사본을 만든다
+    // (버퍼 복사는 memcpy 한 번이라 전체 재합성보다 훨씬 싸다).
+    const hasOnionSkin =
+      onionSkinEnabled && !!onionSkinPixels && onionSkinPixels.length === width * height;
+    const hasPreview = !!previewPixelsRef.current;
+
+    const compositeData = hasOnionSkin || hasPreview
+      ? new ImageData(new Uint8ClampedArray(baseComposite.data), width, height)
+      : baseComposite;
 
     // 1-1. 어니언 스킨 (이전 프레임 잔상 오버레이)
-    if (onionSkinEnabled && onionSkinPixels && onionSkinPixels.length === width * height) {
+    if (hasOnionSkin && onionSkinPixels) {
       for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
           const idx = y * width + x;
@@ -209,9 +229,14 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
     }
 
     // 3. 임시 캔버스에 1:1로 그린 뒤 픽셀 확대 전송
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = width;
-    tempCanvas.height = height;
+    if (!tempCanvasRef.current) {
+      tempCanvasRef.current = document.createElement('canvas');
+    }
+    const tempCanvas = tempCanvasRef.current;
+    if (tempCanvas.width !== width || tempCanvas.height !== height) {
+      tempCanvas.width = width;
+      tempCanvas.height = height;
+    }
     const tempCtx = tempCanvas.getContext('2d')!;
     tempCtx.putImageData(compositeData, 0, 0);
 
@@ -263,7 +288,7 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
         }
       });
     }
-  }, [layers, groups, width, height, zoom, showGrid, horizontalSymmetry, cursorPos, isPanning, brushSize, onionSkinEnabled, onionSkinPixels, canvasBackdrop]);
+  }, [baseComposite, width, height, zoom, showGrid, horizontalSymmetry, cursorPos, isPanning, brushSize, onionSkinEnabled, onionSkinPixels, canvasBackdrop]);
 
   useEffect(() => {
     render();
