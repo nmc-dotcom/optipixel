@@ -10,7 +10,7 @@ import {
   hexToRgba, 
   rgbaToHex 
 } from '../utils/pixelEngine';
-import { ZoomIn, ZoomOut, Maximize2, Move as MoveIcon } from 'lucide-react';
+import { ZoomIn, ZoomOut, Maximize2, Move as MoveIcon, Sun, Moon } from 'lucide-react';
 
 interface PixelCanvasProps {
   layers: Layer[];
@@ -63,6 +63,28 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
 
   // 현재 커서 좌표 HUD
   const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
+
+  // 캔버스 배경(체커보드) 밝기 — 작업물의 투명/반투명 영역을 밝은/어두운
+  // 배경 양쪽에서 미리 볼 수 있도록 앱 전체 테마와 별개로 전환 가능
+  const [canvasBackdrop, setCanvasBackdrop] = useState<'dark' | 'light'>(() => {
+    try {
+      return localStorage.getItem('optipixel_canvas_backdrop') === 'light' ? 'light' : 'dark';
+    } catch {
+      return 'dark';
+    }
+  });
+
+  const toggleCanvasBackdrop = () => {
+    setCanvasBackdrop(prev => {
+      const next = prev === 'dark' ? 'light' : 'dark';
+      try {
+        localStorage.setItem('optipixel_canvas_backdrop', next);
+      } catch {
+        // localStorage 사용 불가 시 무시 (세션 내 상태는 유지됨)
+      }
+      return next;
+    });
+  };
 
   // 드로잉 인터랙션 상태
   const isDrawingRef = useRef(false);
@@ -197,7 +219,7 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
 
     // 4. 그리드 라인 그리기
     if (showGrid && zoom >= 4) {
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+      ctx.strokeStyle = canvasBackdrop === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.1)';
       ctx.lineWidth = 1;
       ctx.beginPath();
 
@@ -226,7 +248,7 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
 
     // 6. 커서 호버 박스 미리보기
     if (cursorPos && !isPanning) {
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+      ctx.strokeStyle = canvasBackdrop === 'dark' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)';
       ctx.lineWidth = 1.5;
       const stamp = getBrushStamp(cursorPos.x, cursorPos.y, brushSize);
       stamp.forEach(pt => {
@@ -241,7 +263,7 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
         }
       });
     }
-  }, [layers, groups, width, height, zoom, showGrid, horizontalSymmetry, cursorPos, isPanning, brushSize, onionSkinEnabled, onionSkinPixels]);
+  }, [layers, groups, width, height, zoom, showGrid, horizontalSymmetry, cursorPos, isPanning, brushSize, onionSkinEnabled, onionSkinPixels, canvasBackdrop]);
 
   useEffect(() => {
     render();
@@ -533,7 +555,9 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
       onContextMenu={(e) => e.preventDefault()}
-      className="relative flex-1 w-full h-full overflow-hidden select-none touch-none cursor-crosshair bg-[#050505]"
+      className={`relative flex-1 w-full h-full overflow-hidden select-none touch-none cursor-crosshair ${
+        canvasBackdrop === 'dark' ? 'bg-[#050505]' : 'bg-gray-200'
+      }`}
     >
       {/* 캔버스 및 투명 체크판 컨테이너 */}
       <div
@@ -542,7 +566,9 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
           width: width * zoom,
           height: height * zoom,
         }}
-        className="absolute shadow-2xl border border-gray-800 bg-checkered"
+        className={`absolute shadow-2xl border border-gray-800 ${
+          canvasBackdrop === 'dark' ? 'bg-checkered' : 'bg-checkered-light'
+        }`}
       >
         <canvas
           ref={canvasRef}
@@ -584,6 +610,16 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
           title="확대"
         >
           <ZoomIn className="w-4 h-4" />
+        </button>
+        <div className="w-px h-5 bg-gray-800 mx-0.5" />
+        <button
+          onClick={toggleCanvasBackdrop}
+          aria-label={canvasBackdrop === 'dark' ? '캔버스 배경: 어두운 배경 (밝은 배경으로 전환)' : '캔버스 배경: 밝은 배경 (어두운 배경으로 전환)'}
+          aria-pressed={canvasBackdrop === 'light'}
+          className="p-1.5 rounded text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
+          title={canvasBackdrop === 'dark' ? '캔버스 배경을 밝게 전환 (투명 영역 미리보기)' : '캔버스 배경을 어둡게 전환 (투명 영역 미리보기)'}
+        >
+          {canvasBackdrop === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
         </button>
       </div>
 
