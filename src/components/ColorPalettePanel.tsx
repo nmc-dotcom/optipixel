@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { PalettePreset } from '../types';
 import { DEFAULT_PALETTES } from '../constants/presets';
-import { Plus, Trash2, FolderPlus, Download, Upload, Check } from 'lucide-react';
+import { Plus, Trash2, FolderPlus, Download, Upload, Check, Globe, Loader2 } from 'lucide-react';
 
 interface ColorPalettePanelProps {
   primaryColor: string;
@@ -31,6 +31,12 @@ export const ColorPalettePanel: React.FC<ColorPalettePanelProps> = ({
   const [hexInput, setHexInput] = useState(primaryColor);
   const [newPaletteName, setNewPaletteName] = useState('');
   const [showNewPaletteInput, setShowNewPaletteInput] = useState(false);
+
+  // Lospec 팔레트 가져오기 상태
+  const [showLospecInput, setShowLospecInput] = useState(false);
+  const [lospecQuery, setLospecQuery] = useState('');
+  const [lospecLoading, setLospecLoading] = useState(false);
+  const [lospecError, setLospecError] = useState<string | null>(null);
 
   useEffect(() => {
     setHexInput(primaryColor);
@@ -104,6 +110,73 @@ export const ColorPalettePanel: React.FC<ColorPalettePanelProps> = ({
   };
 
   const HEX_COLOR_RE = /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/;
+
+  /**
+   * Lospec(lospec.com/palette-list)에서 팔레트를 가져온다.
+   * 슬러그("pico-8")와 전체 URL 양쪽 모두 받아들인다.
+   */
+  const handleFetchLospecPalette = async () => {
+    const raw = lospecQuery.trim();
+    if (!raw) return;
+
+    // URL을 붙여넣어도 되도록 마지막 경로 조각만 슬러그로 사용
+    const slug = raw
+      .replace(/^https?:\/\/(www\.)?lospec\.com\/palette-list\//i, '')
+      .replace(/\.(json|csv)$/i, '')
+      .replace(/[/?#].*$/, '')
+      .trim()
+      .toLowerCase();
+
+    if (!/^[a-z0-9-]+$/.test(slug)) {
+      setLospecError('올바른 팔레트 이름(슬러그) 또는 주소가 아닙니다.');
+      return;
+    }
+
+    setLospecLoading(true);
+    setLospecError(null);
+
+    try {
+      const res = await fetch(`https://lospec.com/palette-list/${slug}.json`);
+      if (!res.ok) {
+        setLospecError(
+          res.status === 404
+            ? `"${slug}" 팔레트를 찾을 수 없습니다.`
+            : `가져오기에 실패했습니다 (HTTP ${res.status}).`
+        );
+        return;
+      }
+
+      const data = await res.json();
+      // Lospec은 색상을 "#" 없이 반환하므로 붙여준다
+      const colors: string[] = Array.isArray(data?.colors)
+        ? data.colors
+            .filter((c: unknown): c is string => typeof c === 'string')
+            .map((c: string) => (c.startsWith('#') ? c : `#${c}`))
+            .filter((c: string) => HEX_COLOR_RE.test(c))
+        : [];
+
+      if (colors.length === 0) {
+        setLospecError('팔레트에 유효한 색상이 없습니다.');
+        return;
+      }
+
+      const imported: PalettePreset = {
+        id: `custom-lospec-${slug}-${Date.now()}`,
+        name: typeof data?.name === 'string' && data.name.trim() ? data.name : slug,
+        category: 'custom',
+        colors,
+      };
+
+      onSaveCustomPalette(imported);
+      onChangePalette(imported);
+      setLospecQuery('');
+      setShowLospecInput(false);
+    } catch {
+      setLospecError('네트워크 오류로 가져오지 못했습니다. 연결을 확인해주세요.');
+    } finally {
+      setLospecLoading(false);
+    }
+  };
 
   const handleImportPalette = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -207,6 +280,18 @@ export const ColorPalettePanel: React.FC<ColorPalettePanelProps> = ({
               <FolderPlus className="w-3.5 h-3.5" />
             </button>
             <button
+              onClick={() => {
+                setShowLospecInput(!showLospecInput);
+                setLospecError(null);
+              }}
+              className={`p-1 rounded hover:bg-gray-800 ${
+                showLospecInput ? 'text-emerald-400' : 'text-gray-400 hover:text-emerald-400'
+              }`}
+              title="Lospec에서 팔레트 가져오기 (lospec.com/palette-list)"
+            >
+              <Globe className="w-3.5 h-3.5" />
+            </button>
+            <button
               onClick={handleExportPalette}
               className="p-1 rounded text-gray-400 hover:text-gray-200 hover:bg-gray-800"
               title="팔레트 JSON 내보내기"
@@ -219,6 +304,41 @@ export const ColorPalettePanel: React.FC<ColorPalettePanelProps> = ({
             </label>
           </div>
         </div>
+
+        {/* Lospec 팔레트 가져오기 인라인 입력 */}
+        {showLospecInput && (
+          <div className="flex flex-col gap-1 p-1.5 bg-[#1A1A1A] rounded border border-emerald-600/50 mb-1">
+            <div className="flex items-center gap-1">
+              <input
+                type="text"
+                value={lospecQuery}
+                onChange={(e) => {
+                  setLospecQuery(e.target.value);
+                  setLospecError(null);
+                }}
+                placeholder="예: pico-8 또는 주소 붙여넣기"
+                disabled={lospecLoading}
+                className="flex-1 min-w-0 bg-[#0A0A0A] text-xs px-2 py-1 rounded text-white focus:outline-none disabled:opacity-50"
+                onKeyDown={(e) => e.key === 'Enter' && handleFetchLospecPalette()}
+              />
+              <button
+                onClick={handleFetchLospecPalette}
+                disabled={lospecLoading || !lospecQuery.trim()}
+                className="p-1 bg-emerald-600 text-white rounded text-xs hover:bg-emerald-500 disabled:bg-gray-700 disabled:cursor-not-allowed shrink-0"
+                title="가져오기"
+              >
+                {lospecLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+              </button>
+            </div>
+            {lospecError ? (
+              <span className="text-[10px] text-rose-400 leading-snug">{lospecError}</span>
+            ) : (
+              <span className="text-[10px] text-gray-500 leading-snug">
+                lospec.com/palette-list 의 팔레트 이름을 입력하세요
+              </span>
+            )}
+          </div>
+        )}
 
         {/* 신규 팔레트 인라인 입력 */}
         {showNewPaletteInput && (
