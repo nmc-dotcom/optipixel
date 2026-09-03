@@ -1,15 +1,17 @@
-import React from 'react';
-import { 
-  Undo2, 
-  Redo2, 
-  Maximize2, 
-  Image as ImageIcon, 
-  SlidersHorizontal, 
+import React, { useRef } from 'react';
+import {
+  Undo2,
+  Redo2,
+  Maximize2,
+  Image as ImageIcon,
+  SlidersHorizontal,
   Code2,
   Download,
   Trash2,
   Layers,
-  Palette
+  Palette,
+  Save,
+  FolderOpen
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -26,6 +28,8 @@ interface NavbarProps {
   onOpenCodeModal: () => void;
   onOpenExportModal: () => void;
   onClearCanvas: () => void;
+  onExportProject: () => void;
+  onImportProject: (file: File) => void;
   onToggleMobileLayers: () => void;
   onToggleMobilePalette: () => void;
   activeMobileTab: 'none' | 'layers' | 'palette';
@@ -45,10 +49,14 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenCodeModal,
   onOpenExportModal,
   onClearCanvas,
+  onExportProject,
+  onImportProject,
   onToggleMobileLayers,
   onToggleMobilePalette,
   activeMobileTab,
 }) => {
+  const projectInputRef = useRef<HTMLInputElement>(null);
+
   return (
     <header className="h-12 border-b border-gray-800 bg-[#111111] px-3 md:px-4 flex items-center justify-between z-30 shrink-0 select-none text-gray-300">
       {/* Brand & Canvas Dimensions Info */}
@@ -136,6 +144,39 @@ export const Navbar: React.FC<NavbarProps> = ({
           <SlidersHorizontal className={`w-3.5 h-3.5 ${isFiltersOpen ? 'text-white' : 'text-emerald-400'}`} />
           <span className="hidden lg:inline">필터</span>
         </button>
+
+        {/* 프로젝트 파일 열기 */}
+        <button
+          id="btn-open-project"
+          onClick={() => projectInputRef.current?.click()}
+          className="p-1.5 rounded text-gray-400 hover:text-emerald-400 hover:bg-gray-800/60 transition-colors"
+          title="프로젝트 파일(.json) 열기"
+        >
+          <FolderOpen className="w-4 h-4" />
+        </button>
+        <input
+          ref={projectInputRef}
+          type="file"
+          accept="application/json,.json"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) onImportProject(file);
+            e.target.value = '';
+          }}
+          className="hidden"
+        />
+
+        {/* 프로젝트 파일로 저장 */}
+        <button
+          id="btn-save-project"
+          onClick={onExportProject}
+          className="p-1.5 rounded text-gray-400 hover:text-emerald-400 hover:bg-gray-800/60 transition-colors"
+          title="프로젝트를 파일(.json)로 저장 — 레이어/그룹 구조가 그대로 보존됩니다"
+        >
+          <Save className="w-4 h-4" />
+        </button>
+
+        <div className="h-4 w-px bg-gray-800 mx-1 hidden sm:block" />
 
         {/* 소스코드 추출 */}
         <button

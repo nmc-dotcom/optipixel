@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { 
   CanvasDimensions, 
   HistoryStep, 
@@ -9,6 +9,13 @@ import {
 } from './types';
 import { DEFAULT_PALETTES, generateInitialPixels } from './constants/presets';
 import { blendPixelArrays } from './utils/pixelEngine';
+import {
+  downloadProjectFile,
+  loadProjectFromStorage,
+  ProjectState,
+  readProjectFile,
+  saveProjectToStorage,
+} from './utils/projectStorage';
 import { Navbar } from './components/Navbar';
 import { Toolbar } from './components/Toolbar';
 import { ColorPalettePanel } from './components/ColorPalettePanel';
@@ -25,10 +32,16 @@ const MAX_HISTORY = 35;
 const STORAGE_PALETTES_KEY = 'optipixel_custom_palettes';
 
 export default function App() {
+  // 0. 이전 세션에서 자동 저장된 작업물 복원 (없으면 null)
+  const [restored] = useState<ProjectState | null>(() => loadProjectFromStorage());
+
   // 1. 캔버스 차원 및 데이터 상태
-  const [dimensions, setDimensions] = useState<CanvasDimensions>({ width: 24, height: 24 });
-  const [groups, setGroups] = useState<LayerGroup[]>([]);
+  const [dimensions, setDimensions] = useState<CanvasDimensions>(
+    restored ? { width: restored.width, height: restored.height } : { width: 24, height: 24 }
+  );
+  const [groups, setGroups] = useState<LayerGroup[]>(restored?.groups ?? []);
   const [layers, setLayers] = useState<Layer[]>(() => {
+    if (restored) return restored.layers;
     const initialPixels = generateInitialPixels(24, 24);
     return [
       {
@@ -42,7 +55,7 @@ export default function App() {
       }
     ];
   });
-  const [activeLayerId, setActiveLayerId] = useState<string>('layer-base');
+  const [activeLayerId, setActiveLayerId] = useState<string>(restored?.activeLayerId ?? 'layer-base');
 
   // 2. Undo / Redo 실행 취소 스택
   const [historyPast, setHistoryPast] = useState<HistoryStep[]>([]);
@@ -98,6 +111,61 @@ export default function App() {
     if (activeIdx <= 0) return null;
     return layers[activeIdx - 1]?.pixels || null;
   }, [layers, activeLayerId, onionSkinEnabled]);
+
+  // 작업물 자동 저장 (편집이 멈춘 뒤 1초 후 저장 — 그리는 동안 매번 직렬화하지 않도록 디바운스)
+  const autosaveWarnedRef = useRef(false);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      const ok = saveProjectToStorage({
+        width: dimensions.width,
+        height: dimensions.height,
+        activeLayerId,
+        groups,
+        layers,
+      });
+      // 용량 초과 등으로 저장에 실패하면 한 번만 경고를 띄운다
+      if (!ok && !autosaveWarnedRef.current) {
+        autosaveWarnedRef.current = true;
+        alert(
+          '작업물 자동 저장에 실패했습니다 (브라우저 저장 공간 부족일 수 있습니다).\n' +
+          '작업 내용을 잃지 않으려면 상단의 "프로젝트 저장" 버튼으로 파일에 저장해주세요.'
+        );
+      }
+    }, 1000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [layers, groups, dimensions, activeLayerId]);
+
+  // 프로젝트를 파일로 내보내기
+  const handleExportProject = () => {
+    downloadProjectFile({
+      width: dimensions.width,
+      height: dimensions.height,
+      activeLayerId,
+      groups,
+      layers,
+    });
+  };
+
+  // 프로젝트 파일 불러오기 (현재 작업물을 덮어쓰므로 확인 후 진행)
+  const handleImportProject = async (file: File) => {
+    if (!window.confirm('현재 작업물을 불러온 프로젝트로 교체할까요? 저장하지 않은 변경사항은 사라집니다.')) {
+      return;
+    }
+    try {
+      const project = await readProjectFile(file);
+      setLayers(project.layers);
+      setGroups(project.groups);
+      setDimensions({ width: project.width, height: project.height });
+      setActiveLayerId(project.activeLayerId);
+      // 다른 프로젝트를 연 뒤의 실행취소는 의미가 없으므로 히스토리를 비운다
+      setHistoryPast([]);
+      setHistoryFuture([]);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '프로젝트를 불러오지 못했습니다.');
+    }
+  };
 
   // 커스텀 팔레트 로컬 저장소 동기화
   const handleSaveCustomPalette = (newPalette: PalettePreset) => {
@@ -547,6 +615,8 @@ export default function App() {
         onOpenCodeModal={() => setIsCodeModalOpen(true)}
         onOpenExportModal={() => setIsExportModalOpen(true)}
         onClearCanvas={handleClearActiveLayer}
+        onExportProject={handleExportProject}
+        onImportProject={handleImportProject}
         onToggleMobileLayers={() => setActiveMobileTab(activeMobileTab === 'layers' ? 'none' : 'layers')}
         onToggleMobilePalette={() => setActiveMobileTab(activeMobileTab === 'palette' ? 'none' : 'palette')}
         activeMobileTab={activeMobileTab}
