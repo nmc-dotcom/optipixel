@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { DitherType, ImageConversionSettings } from '../types';
+import { DitherType, DownscaleMethod, ImageConversionSettings } from '../types';
 import { RESOLUTION_PRESETS } from '../constants/presets';
-import { convertImageToPixels, loadImageFromFile } from '../utils/imageConverter';
-import { Upload, X, Sliders, Sparkles, RefreshCw, Check } from 'lucide-react';
+import { convertImageToPixels, detectPixelScale, DetectedPixelScale, loadImageFromFile } from '../utils/imageConverter';
+import { Upload, X, Sliders, Sparkles, RefreshCw, Check, Wand2 } from 'lucide-react';
 
 interface ImageToPixelModalProps {
   isOpen: boolean;
@@ -37,7 +37,12 @@ export const ImageToPixelModal: React.FC<ImageToPixelModalProps> = ({
     saturation: 10,
     edgePreservation: 45,
     cleanupOrphanPixels: true,
+    downscaleMethod: 'edge-preserving',
+    alphaThreshold: 50,
   });
+
+  // 업스케일된 픽셀 아트에서 감지된 원본 픽셀 크기 제안 (없으면 null)
+  const [detectedScale, setDetectedScale] = useState<DetectedPixelScale | null>(null);
 
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -60,6 +65,7 @@ export const ImageToPixelModal: React.FC<ImageToPixelModalProps> = ({
   const handleFileChange = async (file: File) => {
     try {
       setSelectedFile(file);
+      setDetectedScale(null);
       const img = await loadImageFromFile(file);
 
       if (img.width * img.height > MAX_SOURCE_PIXELS) {
@@ -72,10 +78,24 @@ export const ImageToPixelModal: React.FC<ImageToPixelModalProps> = ({
       }
 
       setLoadedImage(img);
+      setDetectedScale(detectPixelScale(img));
     } catch (err) {
       alert('이미지를 불러오는데 실패했습니다. 지원되는 이미지 파일(PNG, JPG, GIF 등)인지 확인해주세요.');
       setSelectedFile(null);
     }
+  };
+
+  // 감지된 원본 픽셀 크기를 변환 설정에 즉시 적용
+  const applyDetectedScale = () => {
+    if (!detectedScale) return;
+    setSettings(s => ({
+      ...s,
+      targetWidth: detectedScale.suggestedWidth,
+      targetHeight: detectedScale.suggestedHeight,
+      fitMode: 'stretch',
+      downscaleMethod: 'dominant',
+    }));
+    setDetectedScale(null);
   };
 
   // 파라미터 변경 시 픽셀 변환 재계산
@@ -183,6 +203,31 @@ export const ImageToPixelModal: React.FC<ImageToPixelModalProps> = ({
                     className="hidden"
                   />
                 </div>
+
+                {/* 픽셀 아트 업스케일 감지 배너 */}
+                {detectedScale && (
+                  <div className="flex items-start gap-2 p-2.5 bg-emerald-950/30 border border-emerald-700/50 rounded-lg text-xs">
+                    <Wand2 className="w-3.5 h-3.5 text-emerald-400 mt-0.5 shrink-0" />
+                    <div className="flex-1 text-emerald-300 leading-snug">
+                      픽셀 아트 업스케일 감지됨 (약 {detectedScale.scaleX}×{detectedScale.scaleY}배,
+                      신뢰도 {Math.round(detectedScale.confidence * 100)}%). 원본 크기{' '}
+                      {detectedScale.suggestedWidth}×{detectedScale.suggestedHeight}로 되돌릴까요?
+                    </div>
+                    <button
+                      onClick={applyDetectedScale}
+                      className="px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-semibold shrink-0"
+                    >
+                      적용
+                    </button>
+                    <button
+                      onClick={() => setDetectedScale(null)}
+                      className="p-0.5 text-emerald-500/70 hover:text-emerald-300 shrink-0"
+                      title="닫기"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
 
                 {/* 픽셀화 프리뷰 캔버스 뷰포트 */}
                 <div className="flex-1 min-h-[260px] flex items-center justify-center bg-checkered rounded-lg border border-gray-800 p-4 overflow-hidden">
@@ -331,20 +376,63 @@ export const ImageToPixelModal: React.FC<ImageToPixelModalProps> = ({
               </label>
             </div>
 
-            {/* 4. 대비 / 밝기 / 엣지 보존 슬라이더 */}
+            {/* 3-B. 다운스케일 방식 */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[10px] font-mono uppercase text-gray-400">Downscale Method</label>
+              <div className="grid grid-cols-2 gap-1.5 text-xs">
+                {(['edge-preserving', 'dominant'] as const).map(method => (
+                  <button
+                    key={method}
+                    onClick={() => setSettings(s => ({ ...s, downscaleMethod: method as DownscaleMethod }))}
+                    title={
+                      method === 'edge-preserving'
+                        ? '평균+엣지 강조 블렌딩. 일반 사진/그림에 적합'
+                        : '타일 내 최빈 색상 채택 (블렌딩 없음). 이미 픽셀 아트인 이미지에 적합'
+                    }
+                    className={`py-1.5 rounded border transition-colors ${
+                      settings.downscaleMethod === method
+                        ? 'bg-emerald-600 text-white border-emerald-500 font-semibold'
+                        : 'bg-[#161616] border-gray-800 text-gray-300 hover:bg-gray-800'
+                    }`}
+                  >
+                    {method === 'edge-preserving' ? '엣지 보존 (사진)' : '도미넌트 컬러 (픽셀 아트)'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 4. 대비 / 밝기 / 엣지 보존 / 알파 임계값 슬라이더 */}
             <div className="flex flex-col gap-2.5 pt-1">
+              {settings.downscaleMethod === 'edge-preserving' && (
+                <div>
+                  <div className="flex justify-between text-[10px] font-mono uppercase text-gray-400 mb-1">
+                    <span>Edge Preservation (외곽선 보존)</span>
+                    <span className="font-mono text-emerald-400">{settings.edgePreservation}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={settings.edgePreservation}
+                    onChange={(e) => setSettings(s => ({ ...s, edgePreservation: Number(e.target.value) }))}
+                    className="w-full accent-emerald-500 h-1.5 bg-gray-800 rounded cursor-pointer"
+                  />
+                </div>
+              )}
+
               <div>
                 <div className="flex justify-between text-[10px] font-mono uppercase text-gray-400 mb-1">
-                  <span>Edge Preservation (외곽선 보존)</span>
-                  <span className="font-mono text-emerald-400">{settings.edgePreservation}%</span>
+                  <span>Alpha Threshold (투명도 임계값)</span>
+                  <span className="font-mono text-emerald-400">{settings.alphaThreshold}%</span>
                 </div>
                 <input
                   type="range"
                   min={0}
                   max={100}
-                  value={settings.edgePreservation}
-                  onChange={(e) => setSettings(s => ({ ...s, edgePreservation: Number(e.target.value) }))}
+                  value={settings.alphaThreshold}
+                  onChange={(e) => setSettings(s => ({ ...s, alphaThreshold: Number(e.target.value) }))}
                   className="w-full accent-emerald-500 h-1.5 bg-gray-800 rounded cursor-pointer"
+                  title="이 커버리지 미만인 픽셀은 완전 투명, 이상이면 완전 불투명으로 이진화됩니다"
                 />
               </div>
 

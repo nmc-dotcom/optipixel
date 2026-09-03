@@ -47,6 +47,8 @@ export interface HistoryStep {
 
 export type DitherType = 'none' | 'floyd-steinberg' | 'bayer4x4' | 'atkinson';
 
+export type DownscaleMethod = 'edge-preserving' | 'dominant';
+
 export interface ImageConversionSettings {
   targetWidth: number;
   targetHeight: number;
@@ -59,6 +61,8 @@ export interface ImageConversionSettings {
   saturation: number; // -100 to 100
   edgePreservation: number; // 0 to 100 (Pyxelate-style edge magnitude preservation)
   cleanupOrphanPixels: boolean; // Filter isolated lone pixels
+  downscaleMethod: DownscaleMethod; // 타일당 색상 결정 방식: 엣지 보존 블렌드 vs 도미넌트(최빈) 색상
+  alphaThreshold: number; // 0-100. 이 값 미만의 타일 커버리지는 완전 투명으로 이진화
 }
 
 export type CodeExportFormat = 'css' | 'canvas' | 'svg' | 'js-matrix' | 'arduino-c';

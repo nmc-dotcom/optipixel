@@ -209,6 +209,95 @@ function performEdgePreservingDownsample(
 }
 
 /**
+ * 도미넌트 컬러(최빈값) 다운스케일러
+ * 타일 내부 색상을 평균/블렌딩하지 않고 가장 많이 등장한 색상을 그대로 채택한다.
+ * 이미 색상이 균일한 픽셀 아트(특히 업스케일된 이미지)를 축소할 때, 평균으로 인해
+ * 원본에 없던 새로운 혼합 색상이 생기는 것을 방지한다.
+ */
+function performDominantColorDownsample(
+  img: HTMLImageElement,
+  cropArea: { sx: number; sy: number; sWidth: number; sHeight: number },
+  targetWidth: number,
+  targetHeight: number
+): { r: Float32Array; g: Float32Array; b: Float32Array; a: Float32Array } {
+  const srcCanvas = document.createElement('canvas');
+  srcCanvas.width = cropArea.sWidth;
+  srcCanvas.height = cropArea.sHeight;
+  const sCtx = srcCanvas.getContext('2d', { willReadFrequently: true })!;
+  sCtx.drawImage(
+    img,
+    cropArea.sx,
+    cropArea.sy,
+    cropArea.sWidth,
+    cropArea.sHeight,
+    0,
+    0,
+    cropArea.sWidth,
+    cropArea.sHeight
+  );
+
+  const sImgData = sCtx.getImageData(0, 0, cropArea.sWidth, cropArea.sHeight);
+  const sData = sImgData.data;
+  const sW = cropArea.sWidth;
+  const sH = cropArea.sHeight;
+
+  const outR = new Float32Array(targetWidth * targetHeight);
+  const outG = new Float32Array(targetWidth * targetHeight);
+  const outB = new Float32Array(targetWidth * targetHeight);
+  const outA = new Float32Array(targetWidth * targetHeight);
+
+  const tileW = sW / targetWidth;
+  const tileH = sH / targetHeight;
+
+  for (let ty = 0; ty < targetHeight; ty++) {
+    const y0 = Math.floor(ty * tileH);
+    const y1 = Math.min(sH, Math.ceil((ty + 1) * tileH));
+
+    for (let tx = 0; tx < targetWidth; tx++) {
+      const x0 = Math.floor(tx * tileW);
+      const x1 = Math.min(sW, Math.ceil((tx + 1) * tileW));
+
+      const colorCounts = new Map<string, { count: number; r: number; g: number; b: number }>();
+      let coveredCount = 0;
+      let totalCount = 0;
+
+      for (let sy = y0; sy < y1; sy++) {
+        const rowIdx = sy * sW;
+        for (let sx = x0; sx < x1; sx++) {
+          const idx = (rowIdx + sx) * 4;
+          totalCount++;
+          const a = sData[idx + 3] / 255;
+          if (a <= 0.05) continue;
+          coveredCount++;
+          const key = `${sData[idx]},${sData[idx + 1]},${sData[idx + 2]}`;
+          const existing = colorCounts.get(key);
+          if (existing) {
+            existing.count++;
+          } else {
+            colorCounts.set(key, { count: 1, r: sData[idx], g: sData[idx + 1], b: sData[idx + 2] });
+          }
+        }
+      }
+
+      if (coveredCount === 0) continue; // 기본값 0 (완전 투명) 유지
+
+      let dominant = { count: 0, r: 0, g: 0, b: 0 };
+      for (const entry of colorCounts.values()) {
+        if (entry.count > dominant.count) dominant = entry;
+      }
+
+      const outIdx = ty * targetWidth + tx;
+      outR[outIdx] = dominant.r;
+      outG[outIdx] = dominant.g;
+      outB[outIdx] = dominant.b;
+      outA[outIdx] = coveredCount / totalCount;
+    }
+  }
+
+  return { r: outR, g: outG, b: outB, a: outA };
+}
+
+/**
  * 고립된 1px 단독 노이즈(소금-후추 노이즈) 제거 클린업 패스
  */
 function cleanupOrphanPixelsPass(pixels: string[], width: number, height: number): string[] {
@@ -278,7 +367,18 @@ export function convertImageToPixels(
     useCurrentPalette,
     edgePreservation = 40,
     cleanupOrphanPixels = true,
+    downscaleMethod = 'edge-preserving',
+    alphaThreshold = 50,
   } = settings;
+
+  const runDownsample = (
+    cropArea: { sx: number; sy: number; sWidth: number; sHeight: number },
+    tw: number,
+    th: number
+  ) =>
+    downscaleMethod === 'dominant'
+      ? performDominantColorDownsample(img, cropArea, tw, th)
+      : performEdgePreservingDownsample(img, cropArea, tw, th, edgePreservation);
 
   let sx = 0;
   let sy = 0;
@@ -317,13 +417,7 @@ export function convertImageToPixels(
       ? Math.max(1, Math.round(targetWidth / imgAspect))
       : targetHeight;
 
-    const inner = performEdgePreservingDownsample(
-      img,
-      { sx, sy, sWidth, sHeight },
-      innerWidth,
-      innerHeight,
-      edgePreservation
-    );
+    const inner = runDownsample({ sx, sy, sWidth, sHeight }, innerWidth, innerHeight);
 
     rawR = new Float32Array(targetWidth * targetHeight);
     rawG = new Float32Array(targetWidth * targetHeight);
@@ -343,13 +437,7 @@ export function convertImageToPixels(
       }
     }
   } else {
-    ({ r: rawR, g: rawG, b: rawB, a: rawA } = performEdgePreservingDownsample(
-      img,
-      { sx, sy, sWidth, sHeight },
-      targetWidth,
-      targetHeight,
-      edgePreservation
-    ));
+    ({ r: rawR, g: rawG, b: rawB, a: rawA } = runDownsample({ sx, sy, sWidth, sHeight }, targetWidth, targetHeight));
   }
 
   // 2. 전처리(밝기, 대비, 채도) 버퍼 구축
@@ -386,12 +474,16 @@ export function convertImageToPixels(
 
   let resultPixels: string[] = new Array(targetWidth * targetHeight).fill('');
 
+  // 알파 이진화 임계값: 타일 커버리지가 이 값 미만이면 완전 투명, 이상이면
+  // 완전 불투명으로 처리한다 (부드럽게 섞인 반투명 가장자리를 방지).
+  const alphaCut = Math.max(0, Math.min(100, alphaThreshold)) / 100;
+
   // 4-A. Atkinson Dithering (Macintosh / Game Boy 레트로 스타일 - 에러 75% 6방향 분산)
   if (dither === 'atkinson' && activePalette.length > 0) {
     for (let y = 0; y < targetHeight; y++) {
       for (let x = 0; x < targetWidth; x++) {
         const idx = y * targetWidth + x;
-        if (bufferA[idx] <= 0) continue;
+        if (bufferA[idx] < alphaCut) continue;
 
         const current: RGBA = {
           r: Math.max(0, Math.min(255, bufferR[idx])),
@@ -434,7 +526,7 @@ export function convertImageToPixels(
     for (let y = 0; y < targetHeight; y++) {
       for (let x = 0; x < targetWidth; x++) {
         const idx = y * targetWidth + x;
-        if (bufferA[idx] <= 0) continue;
+        if (bufferA[idx] < alphaCut) continue;
 
         const current: RGBA = {
           r: Math.max(0, Math.min(255, bufferR[idx])),
@@ -473,7 +565,7 @@ export function convertImageToPixels(
     for (let y = 0; y < targetHeight; y++) {
       for (let x = 0; x < targetWidth; x++) {
         const idx = y * targetWidth + x;
-        if (bufferA[idx] <= 0) continue;
+        if (bufferA[idx] < alphaCut) continue;
 
         const bayerVal = (BAYER_4X4[y % 4][x % 4] / 15 - 0.5) * 48;
         const current: RGBA = {
@@ -493,7 +585,7 @@ export function convertImageToPixels(
     for (let y = 0; y < targetHeight; y++) {
       for (let x = 0; x < targetWidth; x++) {
         const idx = y * targetWidth + x;
-        if (bufferA[idx] <= 0) continue;
+        if (bufferA[idx] < alphaCut) continue;
 
         const current: RGBA = {
           r: Math.max(0, Math.min(255, bufferR[idx])),
@@ -595,4 +687,89 @@ function extractPaletteFromBuffers(
   }
 
   return centroids;
+}
+
+export interface DetectedPixelScale {
+  scaleX: number;
+  scaleY: number;
+  suggestedWidth: number;
+  suggestedHeight: number;
+  confidence: number; // 0 ~ 1
+}
+
+/**
+ * 업스케일된 픽셀 아트에서 원본 "진짜" 픽셀 크기를 역추정한다 (runs 기반 감지).
+ * 각 행/열을 스캔하며 동일 색상이 연속되는 구간(run)의 길이를 수집한 뒤,
+ * 대부분의 run 길이를 나누어떨어지게 하는 가장 큰 배율 N을 찾는다.
+ * 사진처럼 업스케일되지 않은 이미지에서는 일관된 배율이 나오지 않으므로 null을 반환한다.
+ */
+export function detectPixelScale(img: HTMLImageElement): DetectedPixelScale | null {
+  const w = img.width;
+  const h = img.height;
+  if (w < 4 || h < 4) return null;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+  ctx.drawImage(img, 0, 0);
+  const data = ctx.getImageData(0, 0, w, h).data;
+
+  const COLOR_TOLERANCE = 10; // 채널당 허용 오차 (JPEG 압축 노이즈 대응)
+
+  const sameColor = (i1: number, i2: number) =>
+    Math.abs(data[i1] - data[i2]) <= COLOR_TOLERANCE &&
+    Math.abs(data[i1 + 1] - data[i2 + 1]) <= COLOR_TOLERANCE &&
+    Math.abs(data[i1 + 2] - data[i2 + 2]) <= COLOR_TOLERANCE &&
+    Math.abs(data[i1 + 3] - data[i2 + 3]) <= COLOR_TOLERANCE;
+
+  // 성능을 위해 최대 200개 라인만 샘플링하여 각 라인의 동일 색상 연속 구간(run) 길이를 수집
+  const collectRuns = (lineCount: number, lineLength: number, getIndex: (line: number, pos: number) => number): number[] => {
+    const runs: number[] = [];
+    const step = Math.max(1, Math.floor(lineCount / 200));
+    for (let line = 0; line < lineCount; line += step) {
+      let runStart = 0;
+      for (let pos = 1; pos <= lineLength; pos++) {
+        const prevIdx = getIndex(line, pos - 1) * 4;
+        const isBoundary = pos === lineLength || !sameColor(prevIdx, getIndex(line, pos) * 4);
+        if (isBoundary) {
+          runs.push(pos - runStart);
+          runStart = pos;
+        }
+      }
+    }
+    return runs;
+  };
+
+  const horizontalRuns = collectRuns(h, w, (row, col) => row * w + col);
+  const verticalRuns = collectRuns(w, h, (col, row) => row * w + col);
+
+  const detectScale = (runs: number[]): { scale: number; confidence: number } => {
+    if (runs.length < 8) return { scale: 1, confidence: 0 };
+
+    const maxRun = Math.max(...runs);
+    const maxCandidate = Math.min(64, Math.floor(maxRun / 2));
+
+    for (let n = maxCandidate; n >= 2; n--) {
+      const matches = runs.reduce((acc, r) => acc + (r % n === 0 ? 1 : 0), 0);
+      const confidence = matches / runs.length;
+      if (confidence >= 0.85) {
+        return { scale: n, confidence };
+      }
+    }
+    return { scale: 1, confidence: 0 };
+  };
+
+  const { scale: scaleX, confidence: confX } = detectScale(horizontalRuns);
+  const { scale: scaleY, confidence: confY } = detectScale(verticalRuns);
+
+  if (scaleX < 2 || scaleY < 2) return null;
+
+  return {
+    scaleX,
+    scaleY,
+    suggestedWidth: Math.max(1, Math.round(w / scaleX)),
+    suggestedHeight: Math.max(1, Math.round(h / scaleY)),
+    confidence: Math.min(confX, confY),
+  };
 }
