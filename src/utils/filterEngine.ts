@@ -45,9 +45,17 @@ export function removeBackgroundFromEdges(
     addBorder(width - 1, y);
   }
 
-  const references: RGBA[] = [...borderCounts.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 64)
+  // 가장자리에 스치는 피사체(예: 화면 밖으로 이어지는 팔)의 색까지 배경으로 학습하면
+  // 그 색이 통째로 지워진다. 배경은 가장자리를 "지배"하는 색이라는 점을 이용해,
+  // 가장자리의 20% 이상을 차지하는 색만 표본으로 삼는다.
+  // (디더링으로 배경이 여러 색이어도 각각 큰 비중을 차지하므로 함께 잡힌다)
+  const sortedBorder = [...borderCounts.entries()].sort((a, b) => b[1] - a[1]);
+  const borderTotal = sortedBorder.reduce((sum, [, count]) => sum + count, 0);
+  const DOMINANT_SHARE = 0.2;
+
+  const references: RGBA[] = sortedBorder
+    // 최빈색은 배경으로 볼 수밖에 없으므로 비중과 무관하게 항상 포함한다
+    .filter(([, count], i) => i === 0 || count / borderTotal >= DOMINANT_SHARE)
     .map(([color]) => hexToRgba(color));
 
   const isBackgroundColor = (color: string): boolean => {

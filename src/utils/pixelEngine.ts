@@ -381,6 +381,59 @@ export function blendPixelArrays(
 }
 
 /**
+ * 클릭한 지점과 이어진 비슷한 색 영역을 지운다 (마술봉 지우개).
+ * 가장자리 자동 제거와 달리 사용자가 직접 배경을 지목하므로,
+ * 피사체가 캔버스 가장자리에 닿아 있어도 안전하다.
+ * tolerance는 0~100이며 removeBackgroundFromEdges와 같은 척도를 쓴다.
+ */
+export function magicWandErase(
+  pixels: string[],
+  width: number,
+  height: number,
+  startX: number,
+  startY: number,
+  tolerance: number
+): string[] {
+  if (startX < 0 || startX >= width || startY < 0 || startY >= height) return pixels;
+
+  const startColor = pixels[startY * width + startX] || '';
+  if (!startColor) return pixels; // 이미 투명한 곳을 클릭하면 할 일이 없다
+
+  const maxDistance = (Math.max(0, Math.min(100, tolerance)) / 100) * 300;
+  const target = hexToRgba(startColor);
+
+  const result = [...pixels];
+  const visited = new Uint8Array(width * height);
+  const stack: number[] = [];
+
+  const push = (x: number, y: number) => {
+    const idx = y * width + x;
+    if (visited[idx]) return;
+    visited[idx] = 1;
+    const color = pixels[idx];
+    if (!color) return;
+    if (colorDistance(hexToRgba(color), target) > maxDistance) return;
+    stack.push(idx);
+  };
+
+  push(startX, startY);
+
+  while (stack.length > 0) {
+    const idx = stack.pop()!;
+    result[idx] = '';
+
+    const x = idx % width;
+    const y = (idx - x) / width;
+    if (x > 0) push(x - 1, y);
+    if (x < width - 1) push(x + 1, y);
+    if (y > 0) push(x, y - 1);
+    if (y < height - 1) push(x, y + 1);
+  }
+
+  return result;
+}
+
+/**
  * 드래그 시작/끝 좌표를 캔버스 안쪽의 정규화된 사각 선택 영역으로 변환한다.
  * 좌표 순서(역방향 드래그)와 캔버스 경계를 모두 보정하며,
  * 면적이 0이면 null을 반환한다.

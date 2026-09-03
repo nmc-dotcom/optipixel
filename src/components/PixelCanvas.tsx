@@ -8,6 +8,7 @@ import {
   getLinePoints,
   getRectanglePoints,
   hexToRgba,
+  magicWandErase,
   normalizeSelection,
   rgbaToHex
 } from '../utils/pixelEngine';
@@ -32,6 +33,7 @@ interface PixelCanvasProps {
   onPickColor: (color: string) => void;
   selection: SelectionRect | null;
   onChangeSelection: (selection: SelectionRect | null) => void;
+  wandTolerance: number;
   onionSkinEnabled?: boolean;
   onionSkinPixels?: string[] | null;
 }
@@ -55,6 +57,7 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
   onPickColor,
   selection,
   onChangeSelection,
+  wandTolerance,
   onionSkinEnabled = false,
   onionSkinPixels = null,
 }) => {
@@ -442,6 +445,16 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
       const idx = (pt.y * width + pt.x) * 4;
       const hex = rgbaToHex(comp.data[idx], comp.data[idx + 1], comp.data[idx + 2], comp.data[idx + 3] / 255);
       if (hex) onPickColor(hex);
+      isDrawingRef.current = false;
+      return;
+    }
+
+    // 마술봉: 클릭한 곳과 이어진 비슷한 색 영역을 지운다
+    if (currentTool === 'wand') {
+      const erased = magicWandErase(activeLayer.pixels, width, height, pt.x, pt.y, wandTolerance);
+      if (erased !== activeLayer.pixels) {
+        onUpdateLayerPixels(activeLayer.id, erased, true, '마술봉 지우기');
+      }
       isDrawingRef.current = false;
       return;
     }

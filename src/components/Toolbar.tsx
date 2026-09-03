@@ -9,6 +9,7 @@ import {
   Circle, 
   Move,
   SquareDashed,
+  Wand2,
   FlipHorizontal,
   Grid, 
   ZoomIn, 
@@ -28,6 +29,8 @@ interface ToolbarProps {
   onToggleHorizontalSymmetry: () => void;
   showGrid: boolean;
   onToggleGrid: () => void;
+  wandTolerance: number;
+  onChangeWandTolerance: (tolerance: number) => void;
   zoom: number;
   onZoomIn: () => void;
   onZoomOut: () => void;
@@ -45,6 +48,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onToggleHorizontalSymmetry,
   showGrid,
   onToggleGrid,
+  wandTolerance,
+  onChangeWandTolerance,
   zoom,
   onZoomIn,
   onZoomOut,
@@ -59,6 +64,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
     { id: 'rect', label: '사각형', icon: <Square className="w-4 h-4" />, shortcut: 'U' },
     { id: 'circle', label: '원형', icon: <Circle className="w-4 h-4" />, shortcut: 'C' },
     { id: 'select', label: '영역 선택', icon: <SquareDashed className="w-4 h-4" />, shortcut: 'S' },
+    { id: 'wand', label: '마술봉 지우개', icon: <Wand2 className="w-4 h-4" />, shortcut: 'W' },
     { id: 'move', label: '화면 이동', icon: <Move className="w-4 h-4" />, shortcut: 'M' },
   ];
 
@@ -111,6 +117,31 @@ export const Toolbar: React.FC<ToolbarProps> = ({
       </div>
 
       <div className="w-px h-6 md:w-8 md:h-px bg-gray-800 shrink-0 my-0.5" />
+
+      {/* 마술봉 허용 오차 (마술봉 선택 시에만 노출) */}
+      {currentTool === 'wand' && (
+        <>
+          <div className="flex md:flex-col items-center gap-1">
+            {[0, 10, 20, 40].map(tol => (
+              <button
+                key={tol}
+                onClick={() => onChangeWandTolerance(tol)}
+                aria-label={`마술봉 허용 오차 ${tol}%`}
+                aria-pressed={wandTolerance === tol}
+                className={`w-7 h-7 rounded text-[10px] font-mono font-bold flex items-center justify-center transition-all ${
+                  wandTolerance === tol
+                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+                    : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'
+                }`}
+                title={`마술봉 허용 오차 ${tol}% — 클수록 비슷한 색까지 함께 지웁니다`}
+              >
+                {tol}
+              </button>
+            ))}
+          </div>
+          <div className="w-px h-6 md:w-8 md:h-px bg-gray-800 shrink-0 my-0.5" />
+        </>
+      )}
 
       {/* 도형 채우기 및 대칭 드로잉 */}
       <div className="flex md:flex-col items-center gap-1">

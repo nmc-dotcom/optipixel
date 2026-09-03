@@ -70,6 +70,8 @@ export default function App() {
   const [fillShape, setFillShape] = useState<boolean>(false);
   const [horizontalSymmetry, setHorizontalSymmetry] = useState<boolean>(false);
   const [showGrid, setShowGrid] = useState<boolean>(true);
+  // 마술봉 허용 오차 (0~100). 변환된 사진의 디더링된 배경을 한 번에 잡도록 20%를 기본으로 둔다.
+  const [wandTolerance, setWandTolerance] = useState<number>(20);
   const [zoom, setZoom] = useState<number>(16);
 
   // 4. 팔레트 및 색상 상태
@@ -341,6 +343,7 @@ export default function App() {
           case 'c': setCurrentTool('circle'); break;
           case 'm': setCurrentTool('move'); break;
           case 's': setCurrentTool('select'); break;
+          case 'w': setCurrentTool('wand'); break;
         }
       }
     };
@@ -751,6 +754,8 @@ export default function App() {
           onToggleHorizontalSymmetry={() => setHorizontalSymmetry(!horizontalSymmetry)}
           showGrid={showGrid}
           onToggleGrid={() => setShowGrid(!showGrid)}
+          wandTolerance={wandTolerance}
+          onChangeWandTolerance={setWandTolerance}
           zoom={zoom}
           onZoomIn={() => setZoom(prev => Math.min(64, prev + 2))}
           onZoomOut={() => setZoom(prev => Math.max(1, prev - 2))}
@@ -794,6 +799,7 @@ export default function App() {
               onPickColor={setPrimaryColor}
               selection={selection}
               onChangeSelection={setSelection}
+              wandTolerance={wandTolerance}
               onionSkinEnabled={onionSkinEnabled}
               onionSkinPixels={onionSkinPixels}
             />

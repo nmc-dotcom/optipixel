@@ -7,7 +7,8 @@ export type ToolType =
   | 'rect'
   | 'circle'
   | 'move'
-  | 'select';
+  | 'select'
+  | 'wand';
 
 /** 사각 선택 영역 (캔버스 픽셀 좌표) */
 export interface SelectionRect {

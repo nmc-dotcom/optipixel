@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { removeBackgroundFromEdges, removeColorGlobally } from './filterEngine';
+import { magicWandErase } from './pixelEngine';
 
 const SKY = '#87ceeb';
 const SKY_DITHER = '#7ec4e0'; // 하늘과 거리 30 (디더링 수준)
@@ -71,6 +72,25 @@ describe('removeBackgroundFromEdges', () => {
     expect(render(out, 5, 5, map)).toBe(['.....', '..B..', '.BSB.', '..B..', '.....'].join('\n'));
   });
 
+  it('가장자리에 스치는 피사체 색을 배경으로 오인하지 않는다', () => {
+    // 인물 사진처럼 피사체(B)가 왼쪽 가장자리에 걸쳐 있는 경우.
+    // 가장자리를 지배하는 색(S)만 배경으로 봐야 하며,
+    // 소수 지분인 B가 배경 표본이 되어 그림 전체를 지워버리면 안 된다.
+    const rows = [
+      'SSSSSS',
+      'SSBBSS',
+      'SSBBSS',
+      'BSSSSS', // 피사체가 왼쪽 가장자리에 닿음
+      'BSSSSS',
+      'SSSSSS',
+    ];
+    const out = removeBackgroundFromEdges(parse(rows, map), 6, 6, 10);
+
+    // 배경만 사라지고 피사체 6칸(가운데 4 + 가장자리 2)은 남는다
+    expect(out.filter(c => c === BODY)).toHaveLength(6);
+    expect(out.filter(c => c === SKY)).toHaveLength(0);
+  });
+
   it('이미 전부 투명한 이미지는 그대로 둔다', () => {
     const empty = Array.from({ length: 9 }, () => '');
     expect(removeBackgroundFromEdges(empty, 3, 3, 20)).toEqual(empty);
@@ -107,5 +127,67 @@ describe('removeColorGlobally', () => {
   it('대상 색이 없으면 아무것도 지우지 않는다', () => {
     const pixels = [SKY, BODY];
     expect(removeColorGlobally(pixels, '', 50)).toEqual(pixels);
+  });
+});
+
+describe('magicWandErase', () => {
+  const map = { S: SKY, s: SKY_DITHER, B: BODY };
+
+  it('클릭한 지점과 이어진 같은 색 영역만 지운다', () => {
+    const rows = ['SSSSS', 'SSBSS', 'SBBBS', 'SSBSS', 'SSSSS'];
+    const out = magicWandErase(parse(rows, map), 5, 5, 0, 0, 10);
+
+    expect(render(out, 5, 5, map)).toBe(['.....', '..B..', '.BBB.', '..B..', '.....'].join('\n'));
+  });
+
+  it('피사체가 가장자리에 닿아 있어도 안전하다 (자동 제거와 달리 사용자가 배경을 직접 지목)', () => {
+    // 피사체 B가 왼쪽 가장자리에 걸쳐 있는 상황.
+    // 배경(3,0)을 클릭하면 배경만 사라지고 피사체는 온전히 남는다.
+    const rows = ['SSSSS', 'BBSSS', 'BBSSS', 'SSSSS'];
+    const out = magicWandErase(parse(rows, map), 5, 4, 3, 0, 10);
+
+    expect(out.filter(c => c === BODY)).toHaveLength(4);
+    expect(out.filter(c => c === SKY)).toHaveLength(0);
+  });
+
+  it('허용 오차 안의 비슷한 색까지 이어서 지운다', () => {
+    const rows = ['SsSsS', 'sSBSs', 'SBBBS'];
+    const out = magicWandErase(parse(rows, map), 5, 3, 0, 0, 20);
+
+    expect(out.filter(c => c === SKY || c === SKY_DITHER)).toHaveLength(0);
+    expect(out.filter(c => c === BODY)).toHaveLength(4);
+  });
+
+  it('허용 오차가 0이면 정확히 같은 색만 따라간다', () => {
+    const rows = ['SsS', 'SSS'];
+    const out = magicWandErase(parse(rows, map), 3, 2, 0, 0, 0);
+
+    // 클릭한 S와 정확히 같은 색만 사라지고, 사이에 낀 s는 남는다
+    expect(out.filter(c => c === SKY_DITHER)).toHaveLength(1);
+  });
+
+  it('떨어져 있는 같은 색은 건드리지 않는다', () => {
+    // 왼쪽 S 덩어리와 오른쪽 S 덩어리가 피사체로 완전히 분리되어 있다
+    const rows = ['SBS', 'SBS', 'SBS'];
+    const out = magicWandErase(parse(rows, map), 3, 3, 0, 0, 10);
+
+    expect(render(out, 3, 3, map)).toBe(['.BS', '.BS', '.BS'].join('\n'));
+  });
+
+  it('이미 투명한 곳을 클릭하면 아무 일도 하지 않는다', () => {
+    const pixels = ['', BODY, ''];
+    expect(magicWandErase(pixels, 3, 1, 0, 0, 20)).toEqual(pixels);
+  });
+
+  it('캔버스 밖 좌표는 무시한다', () => {
+    const pixels = [SKY, SKY, SKY, SKY];
+    expect(magicWandErase(pixels, 2, 2, 5, 5, 20)).toEqual(pixels);
+    expect(magicWandErase(pixels, 2, 2, -1, 0, 20)).toEqual(pixels);
+  });
+
+  it('원본 배열을 변경하지 않는다', () => {
+    const input = parse(['SS', 'SS'], map);
+    magicWandErase(input, 2, 2, 0, 0, 10);
+    expect(input.filter(c => c === SKY)).toHaveLength(4);
   });
 });

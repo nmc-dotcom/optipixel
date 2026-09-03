@@ -205,6 +205,36 @@ export const FiltersModal: React.FC<FiltersModalProps> = ({
     onApplyLayerFilter(updatedLayers, desc);
   };
 
+  /**
+   * 가장자리 배경 제거.
+   * 배경과 피사체가 같은 색으로 양자화되었거나 피사체가 가장자리를 크게 덮고 있으면
+   * 그림 전체가 사라질 수 있다. 그런 경우 말없이 지워버리지 않고 먼저 알린다.
+   */
+  const handleRemoveEdgeBackground = () => {
+    const activeLayer = layers.find(l => l.id === activeLayerId);
+    if (activeLayer) {
+      const before = activeLayer.pixels.filter(c => c !== '').length;
+      const after = removeBackgroundFromEdges(activeLayer.pixels, width, height, bgTolerance)
+        .filter(c => c !== '').length;
+
+      if (before > 0 && after / before < 0.1) {
+        const removedPercent = Math.round((1 - after / before) * 100);
+        const proceed = window.confirm(
+          `이 설정으로는 그림의 ${removedPercent}%가 지워집니다.\n\n` +
+          '배경과 피사체가 같은 색이거나, 피사체가 캔버스 가장자리에 넓게 닿아 있을 때 발생합니다.\n' +
+          '허용 오차를 낮추거나, 마술봉(W)으로 배경을 직접 클릭해 지우는 방법을 권합니다.\n\n' +
+          '그래도 진행할까요?'
+        );
+        if (!proceed) return;
+      }
+    }
+
+    handleInstantEffect(
+      (pxs) => removeBackgroundFromEdges(pxs, width, height, bgTolerance),
+      '가장자리 배경 제거'
+    );
+  };
+
   // 취소 시: 열리기 전 원래 백업으로 롤백 후 닫기
   const handleCancel = () => {
     if (onPreviewLayerFilter && initialBackupRef.current.length > 0) {
@@ -532,6 +562,9 @@ export const FiltersModal: React.FC<FiltersModalProps> = ({
                   <p className="text-[11px] text-gray-400 leading-relaxed">
                     사진을 변환하면 배경이 불투명하게 채워져 외곽선을 그릴 자리가 없습니다.
                     배경을 먼저 지워 투명하게 만드세요.
+                    <span className="block mt-1 text-gray-500">
+                      인물이 화면을 가득 채워 가장자리에 닿아 있으면 마술봉(W)으로 배경을 직접 클릭하는 편이 정확합니다.
+                    </span>
                   </p>
 
                   <div>
@@ -551,12 +584,7 @@ export const FiltersModal: React.FC<FiltersModalProps> = ({
                   </div>
 
                   <button
-                    onClick={() =>
-                      handleInstantEffect(
-                        (pxs) => removeBackgroundFromEdges(pxs, width, height, bgTolerance),
-                        '가장자리 배경 제거'
-                      )
-                    }
+                    onClick={handleRemoveEdgeBackground}
                     className="w-full py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-semibold shadow-sm transition-colors flex items-center justify-center gap-1.5"
                     title="캔버스 가장자리에 닿아 있는 배경만 지웁니다. 피사체 안쪽의 같은 색은 남습니다."
                   >
