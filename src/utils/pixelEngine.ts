@@ -311,3 +311,39 @@ export function compositeLayers(
 
   return imgData;
 }
+
+/**
+ * top 레이어를 bottom 레이어 위에 불투명도/표시여부를 반영해 알파 합성한
+ * 픽셀 배열을 반환한다 (레이어 병합에 사용)
+ */
+export function blendPixelArrays(
+  topPixels: string[],
+  topOpacity: number,
+  topVisible: boolean,
+  bottomPixels: string[]
+): string[] {
+  if (!topVisible) return [...bottomPixels];
+
+  const opacity = Math.max(0, Math.min(1, topOpacity));
+  if (opacity <= 0) return [...bottomPixels];
+
+  return bottomPixels.map((bottomHex, idx) => {
+    const topHex = topPixels[idx];
+    if (!topHex) return bottomHex;
+
+    const src = hexToRgba(topHex);
+    const srcAlpha = src.a * opacity;
+    if (srcAlpha <= 0) return bottomHex;
+
+    const dst = hexToRgba(bottomHex);
+    const outA = srcAlpha + dst.a * (1 - srcAlpha);
+    if (outA <= 0) return '';
+
+    return rgbaToHex(
+      (src.r * srcAlpha + dst.r * dst.a * (1 - srcAlpha)) / outA,
+      (src.g * srcAlpha + dst.g * dst.a * (1 - srcAlpha)) / outA,
+      (src.b * srcAlpha + dst.b * dst.a * (1 - srcAlpha)) / outA,
+      outA
+    );
+  });
+}

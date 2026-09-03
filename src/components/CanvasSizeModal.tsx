@@ -46,6 +46,9 @@ export const CanvasSizeModal: React.FC<CanvasSizeModalProps> = ({
   };
 
   const handleApply = () => {
+    if (resizeMode === 'clear' && !window.confirm('모든 레이어의 내용을 지우고 새 빈 캔버스로 시작할까요? (실행취소로 되돌릴 수 있습니다)')) {
+      return;
+    }
     onResizeCanvas(selectedWidth, selectedHeight, resizeMode);
     onClose();
   };

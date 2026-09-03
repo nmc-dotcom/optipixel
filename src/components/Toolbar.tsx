@@ -71,9 +71,11 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               key={tool.id}
               id={`tool-${tool.id}`}
               onClick={() => onChangeTool(tool.id)}
+              aria-label={`${tool.label} (${tool.shortcut})`}
+              aria-pressed={isActive}
               className={`relative w-8 h-8 rounded flex items-center justify-center transition-all ${
-                isActive 
-                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-sm' 
+                isActive
+                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-sm'
                   : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'
               }`}
               title={`${tool.label} (${tool.shortcut})`}
@@ -92,12 +94,14 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           <button
             key={size}
             onClick={() => onChangeBrushSize(size)}
+            aria-label={`브러시 크기: ${size}px`}
+            aria-pressed={brushSize === size}
             className={`w-7 h-7 rounded text-xs font-mono font-bold flex items-center justify-center transition-all ${
-              brushSize === size 
-                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40' 
+              brushSize === size
+                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
                 : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'
             }`}
-            title={`브러시 크기: ${size}px`}
+            title={`브러시 크기: ${size}px${size === 1 ? ' ([)' : size === 4 ? ' (])' : ''}`}
           >
             {size}
           </button>
@@ -112,6 +116,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         {(currentTool === 'rect' || currentTool === 'circle') && (
           <button
             onClick={onToggleFillShape}
+            aria-label={fillShape ? '도형 채우기 모드 (켜짐)' : '도형 외곽선 모드'}
+            aria-pressed={fillShape}
             className={`w-8 h-8 rounded flex items-center justify-center text-xs transition-colors ${
               fillShape
                 ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
@@ -126,6 +132,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         {/* 좌우 대칭(미러) 드로잉 모드 */}
         <button
           onClick={onToggleHorizontalSymmetry}
+          aria-label={horizontalSymmetry ? '좌우 대칭 모드 (활성)' : '좌우 대칭 모드 켜기'}
+          aria-pressed={horizontalSymmetry}
           className={`w-8 h-8 rounded flex items-center justify-center text-xs transition-colors ${
             horizontalSymmetry
               ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-sm'
@@ -139,6 +147,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         {/* 그리드 선 표시/숨김 */}
         <button
           onClick={onToggleGrid}
+          aria-label={showGrid ? '그리드 숨기기' : '그리드 보기'}
+          aria-pressed={showGrid}
           className={`w-8 h-8 rounded flex items-center justify-center text-xs transition-colors ${
             showGrid
               ? 'bg-gray-800 text-emerald-400'
@@ -165,7 +175,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           className="px-1 py-0.5 rounded text-[10px] font-mono text-gray-400 hover:text-emerald-400 hover:bg-gray-800 transition-colors"
           title="배율 초기화 (100%)"
         >
-          {Math.round(zoom * 100)}%
+          {Math.round((zoom / 16) * 100)}%
         </button>
         <button
           onClick={onZoomOut}

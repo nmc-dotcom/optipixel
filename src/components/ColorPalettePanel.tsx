@@ -103,6 +103,8 @@ export const ColorPalettePanel: React.FC<ColorPalettePanelProps> = ({
     dlAnchor.click();
   };
 
+  const HEX_COLOR_RE = /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/;
+
   const handleImportPalette = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -110,21 +112,28 @@ export const ColorPalettePanel: React.FC<ColorPalettePanelProps> = ({
     reader.onload = (event) => {
       try {
         const parsed = JSON.parse(event.target?.result as string);
-        if (parsed.name && Array.isArray(parsed.colors)) {
-          const imported: PalettePreset = {
-            id: `custom-${Date.now()}`,
-            name: parsed.name,
-            category: 'custom',
-            colors: parsed.colors,
-          };
-          onSaveCustomPalette(imported);
-          onChangePalette(imported);
+        const validColors = Array.isArray(parsed.colors) && parsed.colors.length > 0
+          && parsed.colors.every((c: unknown) => typeof c === 'string' && HEX_COLOR_RE.test(c));
+
+        if (typeof parsed.name !== 'string' || !parsed.name.trim() || !validColors) {
+          alert('올바른 팔레트 JSON 파일이 아닙니다 (name과 유효한 hex 색상 배열 colors가 필요합니다).');
+          return;
         }
+
+        const imported: PalettePreset = {
+          id: `custom-${Date.now()}`,
+          name: parsed.name,
+          category: 'custom',
+          colors: parsed.colors,
+        };
+        onSaveCustomPalette(imported);
+        onChangePalette(imported);
       } catch (err) {
         alert('올바른 팔레트 JSON 파일이 아닙니다.');
       }
     };
     reader.readAsText(file);
+    e.target.value = '';
   };
 
   return (
@@ -313,7 +322,11 @@ export const ColorPalettePanel: React.FC<ColorPalettePanelProps> = ({
         {/* 커스텀 팔레트 삭제 버튼 */}
         {activePalette.category === 'custom' && (
           <button
-            onClick={() => onDeleteCustomPalette(activePalette.id)}
+            onClick={() => {
+              if (window.confirm(`"${activePalette.name}" 팔레트를 삭제할까요?`)) {
+                onDeleteCustomPalette(activePalette.id);
+              }
+            }}
             className="text-[11px] text-gray-500 hover:text-rose-400 flex items-center justify-center gap-1 py-1 mt-auto transition-colors"
           >
             <Trash2 className="w-3 h-3" />

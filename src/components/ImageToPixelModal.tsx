@@ -53,47 +53,67 @@ export const ImageToPixelModal: React.FC<ImageToPixelModalProps> = ({
     }
   }, [isOpen, currentWidth, currentHeight]);
 
+  // 원본 이미지 픽셀 수 상한 (초과 시 대용량 메모리 할당/브라우저 멈춤 방지를 위해 거부)
+  const MAX_SOURCE_PIXELS = 4096 * 4096;
+
   // 이미지 파일 로드
   const handleFileChange = async (file: File) => {
     try {
       setSelectedFile(file);
       const img = await loadImageFromFile(file);
+
+      if (img.width * img.height > MAX_SOURCE_PIXELS) {
+        alert(
+          `이미지 해상도가 너무 큽니다 (${img.width}×${img.height}). ` +
+          `4096×4096 이하의 이미지를 사용해주세요.`
+        );
+        setSelectedFile(null);
+        return;
+      }
+
       setLoadedImage(img);
     } catch (err) {
-      alert('이미지를 불러오는데 실패했습니다.');
+      alert('이미지를 불러오는데 실패했습니다. 지원되는 이미지 파일(PNG, JPG, GIF 등)인지 확인해주세요.');
+      setSelectedFile(null);
     }
   };
 
   // 파라미터 변경 시 픽셀 변환 재계산
+  // 슬라이더를 드래그하는 동안 매 tick마다 무거운 변환 파이프라인이 동기적으로
+  // 재실행되어 UI가 멈추는 것을 막기 위해 디바운스를 적용한다.
   useEffect(() => {
     if (!loadedImage) return;
 
-    const result = convertImageToPixels(loadedImage, settings, activePaletteColors);
-    setPreviewPixels(result.pixels);
+    const timeoutId = window.setTimeout(() => {
+      const result = convertImageToPixels(loadedImage, settings, activePaletteColors);
+      setPreviewPixels(result.pixels);
 
-    // 프리뷰 캔버스에 렌더
-    const canvas = previewCanvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+      // 프리뷰 캔버스에 렌더
+      const canvas = previewCanvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
 
-    canvas.width = settings.targetWidth;
-    canvas.height = settings.targetHeight;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+      canvas.width = settings.targetWidth;
+      canvas.height = settings.targetHeight;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    const imgData = ctx.createImageData(canvas.width, canvas.height);
-    for (let i = 0; i < result.pixels.length; i++) {
-      const hex = result.pixels[i];
-      const pIdx = i * 4;
-      if (hex) {
-        const num = parseInt(hex.replace('#', ''), 16);
-        imgData.data[pIdx] = (num >> 16) & 255;
-        imgData.data[pIdx + 1] = (num >> 8) & 255;
-        imgData.data[pIdx + 2] = num & 255;
-        imgData.data[pIdx + 3] = 255;
+      const imgData = ctx.createImageData(canvas.width, canvas.height);
+      for (let i = 0; i < result.pixels.length; i++) {
+        const hex = result.pixels[i];
+        const pIdx = i * 4;
+        if (hex) {
+          const num = parseInt(hex.replace('#', ''), 16);
+          imgData.data[pIdx] = (num >> 16) & 255;
+          imgData.data[pIdx + 1] = (num >> 8) & 255;
+          imgData.data[pIdx + 2] = num & 255;
+          imgData.data[pIdx + 3] = 255;
+        }
       }
-    }
-    ctx.putImageData(imgData, 0, 0);
+      ctx.putImageData(imgData, 0, 0);
+    }, 180);
+
+    return () => window.clearTimeout(timeoutId);
   }, [loadedImage, settings, activePaletteColors]);
 
   if (!isOpen) return null;

@@ -15,6 +15,24 @@ function hexToRgb565(hex: string): string {
 }
 
 /**
+ * 합성된 결과에 투명/반투명 픽셀이 존재하는지 확인
+ * (RGB565 등 알파 채널이 없는 포맷으로 내보내기 전 경고에 사용)
+ */
+export function hasTransparentPixels(
+  layers: Layer[],
+  groups: LayerGroup[],
+  width: number,
+  height: number
+): boolean {
+  const imgData = compositeLayers(layers, groups, width, height);
+  const data = imgData.data;
+  for (let i = 3; i < data.length; i += 4) {
+    if (data[i] < 255) return true;
+  }
+  return false;
+}
+
+/**
  * 복합 레이어에서 압축된 유효 픽셀 목록 추출
  */
 function getCompositedPixelArray(
@@ -61,7 +79,7 @@ export function generateSourceCode(
         .map(p => `${(p.x + 1) * pixelSize}px ${(p.y + 1) * pixelSize}px 0 0 ${p.hex}`)
         .join(',\n    ');
 
-      return `/* PixelCraft Pro - Pure CSS Box-Shadow Pixel Art */
+      return `/* optipixel - Pure CSS Box-Shadow Pixel Art */
 .pixel-art {
   width: ${pixelSize}px;
   height: ${pixelSize}px;
@@ -84,14 +102,14 @@ export function generateSourceCode(
         .join('\n');
 
       return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" shape-rendering="crispEdges" width="${width * 8}" height="${height * 8}">
-<!-- PixelCraft Pro Generated Vector SVG -->
+<!-- optipixel Generated Vector SVG -->
 ${rects}
 </svg>`;
     }
 
     case 'canvas': {
       return `/**
- * PixelCraft Pro - HTML5 Canvas 2D 렌더러
+ * optipixel - HTML5 Canvas 2D 렌더러
  * @param {CanvasRenderingContext2D} ctx
  * @param {number} scale 픽셀 확대 배율 (기본값: 4)
  * @param {number} offsetX 그리기 시작 X 좌표
@@ -126,7 +144,7 @@ function renderPixelArt(ctx, scale = 4, offsetX = 0, offsetY = 0) {
       });
 
       return `/**
- * PixelCraft Pro - 2D Pixel Matrix (${width}x${height})
+ * optipixel - 2D Pixel Matrix (${width}x${height})
  */
 export const PIXEL_ART_METADATA = {
   width: ${width},
@@ -141,11 +159,13 @@ export const PIXEL_MATRIX: string[][] = ${JSON.stringify(matrix, null, 2)};`;
       const imgData = compositeLayers(layers, groups, width, height);
       const data = imgData.data;
       const rgb565Array: string[] = [];
+      let hasTransparency = false;
 
       for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
           const idx = (y * width + x) * 4;
           const a = data[idx + 3];
+          if (a < 255) hasTransparency = true;
           if (a < 32) {
             rgb565Array.push('0x0000');
           } else {
@@ -162,10 +182,14 @@ export const PIXEL_MATRIX: string[][] = ${JSON.stringify(matrix, null, 2)};`;
         lines.push('  ' + rgb565Array.slice(i, i + 16).join(', '));
       }
 
+      const transparencyWarning = hasTransparency
+        ? `//\n// ⚠ 경고: RGB565 포맷은 알파(투명도) 채널을 지원하지 않습니다.\n//    이 작품의 투명/반투명 픽셀은 검정(0x0000)으로 변환되었습니다.\n`
+        : '';
+
       return `// ========================================================
-// PixelCraft Pro - Arduino / TFT_eSPI RGB565 Sprite Data
+// optipixel - Arduino / TFT_eSPI RGB565 Sprite Data
 // Width: ${width} px, Height: ${height} px, Size: ${width * height} words
-// ========================================================
+${transparencyWarning}// ========================================================
 #include <Arduino.h>
 
 #define SPRITE_WIDTH  ${width}

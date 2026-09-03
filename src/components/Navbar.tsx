@@ -5,10 +5,8 @@ import {
   Maximize2, 
   Image as ImageIcon, 
   SlidersHorizontal, 
-  Code2, 
-  Download, 
-  Sun, 
-  Moon, 
+  Code2,
+  Download,
   Trash2,
   Layers,
   Palette
@@ -28,8 +26,6 @@ interface NavbarProps {
   onOpenCodeModal: () => void;
   onOpenExportModal: () => void;
   onClearCanvas: () => void;
-  isDark: boolean;
-  onToggleTheme: () => void;
   onToggleMobileLayers: () => void;
   onToggleMobilePalette: () => void;
   activeMobileTab: 'none' | 'layers' | 'palette';
@@ -49,8 +45,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenCodeModal,
   onOpenExportModal,
   onClearCanvas,
-  isDark,
-  onToggleTheme,
   onToggleMobileLayers,
   onToggleMobilePalette,
   activeMobileTab,
@@ -68,7 +62,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
           <div className="hidden sm:block">
             <h1 className="font-bold text-sm tracking-tight text-white flex items-center gap-1.5">
-              PixelCraft <span className="text-emerald-500 text-[10px] align-top px-1 border border-emerald-500/80 rounded font-mono">PRO</span>
+              opti<span className="text-emerald-500">pixel</span>
             </h1>
           </div>
         </div>
@@ -159,7 +153,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           id="btn-export-image"
           onClick={onOpenExportModal}
           className="flex items-center gap-1 px-3 py-1.5 rounded text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition-colors"
-          title="PNG, SVG, 스트라이프(스프라이트 시트) 내보내기"
+          title="PNG, SVG, 스트라이프(스프라이트 시트) 내보내기 (Ctrl+S)"
         >
           <Download className="w-3.5 h-3.5" />
           <span>내보내기</span>
@@ -175,16 +169,6 @@ export const Navbar: React.FC<NavbarProps> = ({
           title="현재 활성 레이어 지우기"
         >
           <Trash2 className="w-4 h-4" />
-        </button>
-
-        {/* 테마 토글 */}
-        <button
-          id="btn-toggle-theme"
-          onClick={onToggleTheme}
-          className="p-1.5 rounded text-gray-400 hover:text-gray-200 hover:bg-gray-800/60 transition-colors"
-          title={isDark ? '라이트 모드로 전환' : '다크 모드로 전환'}
-        >
-          {isDark ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-gray-300" />}
         </button>
 
         {/* 모바일 전용: 레이어 및 팔레트 토글 탭 버튼 */}

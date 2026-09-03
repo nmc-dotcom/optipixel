@@ -257,7 +257,7 @@ export function generateSpriteAtlasJson(
 
   const atlas = {
     meta: {
-      app: 'PixelCraft Pro Sprite Engine',
+      app: 'optipixel Sprite Engine',
       version: '1.0.0',
       image: imageFilename,
       format: 'RGBA8888',

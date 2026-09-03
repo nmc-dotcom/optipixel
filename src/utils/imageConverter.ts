@@ -285,19 +285,9 @@ export function convertImageToPixels(
   let sWidth = img.width;
   let sHeight = img.height;
 
-  if (fitMode === 'fit') {
-    const imgAspect = img.width / img.height;
-    const targetAspect = targetWidth / targetHeight;
-    if (imgAspect > targetAspect) {
-      sHeight = img.height;
-      sWidth = Math.round(img.height * targetAspect);
-      sx = Math.floor((img.width - sWidth) / 2);
-    } else {
-      sWidth = img.width;
-      sHeight = Math.round(img.width / targetAspect);
-      sy = Math.floor((img.height - sHeight) / 2);
-    }
-  } else if (fitMode === 'crop') {
+  // 'fit'은 원본 전체를 자르지 않고 사용하며, 아래에서 레터박스/필러박스로
+  // 여백을 채운다 (크롭하지 않음 — sx/sy/sWidth/sHeight는 원본 그대로 둔다).
+  if (fitMode === 'crop') {
     const imgAspect = img.width / img.height;
     const targetAspect = targetWidth / targetHeight;
     if (imgAspect > targetAspect) {
@@ -310,13 +300,57 @@ export function convertImageToPixels(
   }
 
   // 1. Pyxelate 스타일 엣지 보존 다운스케일링 수행
-  const { r: rawR, g: rawG, b: rawB, a: rawA } = performEdgePreservingDownsample(
-    img,
-    { sx, sy, sWidth, sHeight },
-    targetWidth,
-    targetHeight,
-    edgePreservation
-  );
+  let rawR: Float32Array;
+  let rawG: Float32Array;
+  let rawB: Float32Array;
+  let rawA: Float32Array;
+
+  if (fitMode === 'fit') {
+    // 원본 종횡비를 유지한 내부 크기로 다운스케일 후, 목표 캔버스 중앙에
+    // 배치하고 나머지는 투명 여백(레터박스/필러박스)으로 채운다.
+    const imgAspect = sWidth / sHeight;
+    const targetAspect = targetWidth / targetHeight;
+    const innerWidth = imgAspect > targetAspect
+      ? targetWidth
+      : Math.max(1, Math.round(targetHeight * imgAspect));
+    const innerHeight = imgAspect > targetAspect
+      ? Math.max(1, Math.round(targetWidth / imgAspect))
+      : targetHeight;
+
+    const inner = performEdgePreservingDownsample(
+      img,
+      { sx, sy, sWidth, sHeight },
+      innerWidth,
+      innerHeight,
+      edgePreservation
+    );
+
+    rawR = new Float32Array(targetWidth * targetHeight);
+    rawG = new Float32Array(targetWidth * targetHeight);
+    rawB = new Float32Array(targetWidth * targetHeight);
+    rawA = new Float32Array(targetWidth * targetHeight); // 기본값 0 = 투명 여백
+
+    const padX = Math.floor((targetWidth - innerWidth) / 2);
+    const padY = Math.floor((targetHeight - innerHeight) / 2);
+    for (let y = 0; y < innerHeight; y++) {
+      for (let x = 0; x < innerWidth; x++) {
+        const srcIdx = y * innerWidth + x;
+        const dstIdx = (y + padY) * targetWidth + (x + padX);
+        rawR[dstIdx] = inner.r[srcIdx];
+        rawG[dstIdx] = inner.g[srcIdx];
+        rawB[dstIdx] = inner.b[srcIdx];
+        rawA[dstIdx] = inner.a[srcIdx];
+      }
+    }
+  } else {
+    ({ r: rawR, g: rawG, b: rawB, a: rawA } = performEdgePreservingDownsample(
+      img,
+      { sx, sy, sWidth, sHeight },
+      targetWidth,
+      targetHeight,
+      edgePreservation
+    ));
+  }
 
   // 2. 전처리(밝기, 대비, 채도) 버퍼 구축
   const bufferR = new Float32Array(targetWidth * targetHeight);
@@ -338,11 +372,16 @@ export function convertImageToPixels(
   }
 
   // 3. 팔레트 구성
+  // colorCount가 256(풀 컬러)이거나 0(무제한)이어도, 디더링 알고리즘이
+  // 선택되어 있으면 디더링이 실제로 동작하도록 팔레트를 추출한다
+  // (디더링은 목표 팔레트가 있어야만 의미가 있다).
   let activePalette: RGBA[] = [];
   if (useCurrentPalette && targetPaletteHex.length > 0) {
     activePalette = targetPaletteHex.map(hexToRgba);
-  } else if (colorCount > 0 && colorCount < 256) {
+  } else if (colorCount > 0) {
     activePalette = extractPaletteFromBuffers(bufferR, bufferG, bufferB, bufferA, colorCount);
+  } else if (dither !== 'none') {
+    activePalette = extractPaletteFromBuffers(bufferR, bufferG, bufferB, bufferA, 256);
   }
 
   let resultPixels: string[] = new Array(targetWidth * targetHeight).fill('');

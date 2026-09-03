@@ -8,6 +8,7 @@ import {
   ToolType 
 } from './types';
 import { DEFAULT_PALETTES, generateInitialPixels } from './constants/presets';
+import { blendPixelArrays } from './utils/pixelEngine';
 import { Navbar } from './components/Navbar';
 import { Toolbar } from './components/Toolbar';
 import { ColorPalettePanel } from './components/ColorPalettePanel';
@@ -21,7 +22,7 @@ import { CodeExportModal } from './components/CodeExportModal';
 import { FiltersModal } from './components/FiltersModal';
 
 const MAX_HISTORY = 35;
-const STORAGE_PALETTES_KEY = 'pixelcraft_custom_palettes';
+const STORAGE_PALETTES_KEY = 'optipixel_custom_palettes';
 
 export default function App() {
   // 1. 캔버스 차원 및 데이터 상태
@@ -62,26 +63,32 @@ export default function App() {
   const [customPalettes, setCustomPalettes] = useState<PalettePreset[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_PALETTES_KEY);
-      return saved ? JSON.parse(saved) : [];
+      if (!saved) return [];
+      const parsed = JSON.parse(saved);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter((p: unknown): p is PalettePreset =>
+        !!p && typeof p === 'object'
+        && typeof (p as PalettePreset).id === 'string'
+        && typeof (p as PalettePreset).name === 'string'
+        && Array.isArray((p as PalettePreset).colors)
+        && (p as PalettePreset).colors.every((c) => typeof c === 'string')
+      );
     } catch {
       return [];
     }
   });
 
-  // 5. 다크 모드
-  const [isDark, setIsDark] = useState<boolean>(true);
-
-  // 6. 모바일 사이드 시트 탭
+  // 5. 모바일 사이드 시트 탭
   const [activeMobileTab, setActiveMobileTab] = useState<'none' | 'layers' | 'palette'>('none');
 
-  // 7. 모달 오픈 상태
+  // 6. 모달 오픈 상태
   const [isConvertModalOpen, setIsConvertModalOpen] = useState(false);
   const [isSizeModalOpen, setIsSizeModalOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [isCodeModalOpen, setIsCodeModalOpen] = useState(false);
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
 
-  // 8. 스프라이트 애니메이션 & 어니언 스킨 상태
+  // 7. 스프라이트 애니메이션 & 어니언 스킨 상태
   const [onionSkinEnabled, setOnionSkinEnabled] = useState<boolean>(false);
 
   // 현재 활성 프레임(레이어)의 이전 프레임 잔상 픽셀 연산
@@ -91,15 +98,6 @@ export default function App() {
     if (activeIdx <= 0) return null;
     return layers[activeIdx - 1]?.pixels || null;
   }, [layers, activeLayerId, onionSkinEnabled]);
-
-  // 다크 모드 DOM 동기화
-  useEffect(() => {
-    if (isDark) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-  }, [isDark]);
 
   // 커스텀 팔레트 로컬 저장소 동기화
   const handleSaveCustomPalette = (newPalette: PalettePreset) => {
@@ -217,6 +215,23 @@ export default function App() {
       ) {
         e.preventDefault();
         handleRedo();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
+        e.preventDefault();
+        handleDuplicateLayer(activeLayerId);
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        setIsExportModalOpen(true);
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (layers.length > 1) {
+          const target = layers.find(l => l.id === activeLayerId);
+          if (target && window.confirm(`"${target.name}" 레이어를 삭제할까요?`)) {
+            handleDeleteLayer(activeLayerId);
+          }
+        }
+      } else if (e.key === '[') {
+        setBrushSize(prev => Math.max(1, prev - 1));
+      } else if (e.key === ']') {
+        setBrushSize(prev => Math.min(4, prev + 1));
       } else {
         switch (e.key.toLowerCase()) {
           case 'b': setCurrentTool('brush'); break;
@@ -233,7 +248,7 @@ export default function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleUndo, handleRedo]);
+  }, [handleUndo, handleRedo, layers, activeLayerId]);
 
   // 레이어 픽셀 업데이트
   const handleUpdateLayerPixels = (
@@ -312,13 +327,8 @@ export default function App() {
     const top = layers[idx];
     const bottom = layers[idx - 1];
 
-    // 픽셀 병합 (top over bottom)
-    const mergedPixels = [...bottom.pixels];
-    for (let i = 0; i < top.pixels.length; i++) {
-      if (top.pixels[i]) {
-        mergedPixels[i] = top.pixels[i];
-      }
-    }
+    // 픽셀 병합 (top over bottom, 불투명도/표시여부 반영한 알파 합성)
+    const mergedPixels = blendPixelArrays(top.pixels, top.opacity, top.visible, bottom.pixels);
 
     const mergedLayer: Layer = {
       ...bottom,
@@ -521,7 +531,7 @@ export default function App() {
   };
 
   return (
-    <div className={`h-screen w-screen flex flex-col overflow-hidden ${isDark ? 'dark bg-[#0A0A0A] text-gray-300' : 'bg-gray-50 text-gray-900'}`}>
+    <div className="h-screen w-screen flex flex-col overflow-hidden dark bg-[#0A0A0A] text-gray-300">
       {/* 1. 상단 내비게이션 바 */}
       <Navbar
         canvasWidth={dimensions.width}
@@ -537,8 +547,6 @@ export default function App() {
         onOpenCodeModal={() => setIsCodeModalOpen(true)}
         onOpenExportModal={() => setIsExportModalOpen(true)}
         onClearCanvas={handleClearActiveLayer}
-        isDark={isDark}
-        onToggleTheme={() => setIsDark(!isDark)}
         onToggleMobileLayers={() => setActiveMobileTab(activeMobileTab === 'layers' ? 'none' : 'layers')}
         onToggleMobilePalette={() => setActiveMobileTab(activeMobileTab === 'palette' ? 'none' : 'palette')}
         activeMobileTab={activeMobileTab}
@@ -599,7 +607,6 @@ export default function App() {
               onZoomChange={setZoom}
               onUpdateLayerPixels={handleUpdateLayerPixels}
               onPickColor={setPrimaryColor}
-              isDark={isDark}
               onionSkinEnabled={onionSkinEnabled}
               onionSkinPixels={onionSkinPixels}
             />

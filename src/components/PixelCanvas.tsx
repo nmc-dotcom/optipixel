@@ -29,7 +29,6 @@ interface PixelCanvasProps {
   onZoomChange: (newZoom: number) => void;
   onUpdateLayerPixels: (layerId: string, newPixels: string[], recordHistory?: boolean, description?: string) => void;
   onPickColor: (color: string) => void;
-  isDark: boolean;
   onionSkinEnabled?: boolean;
   onionSkinPixels?: string[] | null;
 }
@@ -51,7 +50,6 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
   onZoomChange,
   onUpdateLayerPixels,
   onPickColor,
-  isDark,
   onionSkinEnabled = false,
   onionSkinPixels = null,
 }) => {
@@ -81,15 +79,32 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
 
   // 캔버스 초기 센터링
   useEffect(() => {
-    if (!containerRef.current) return;
-    const rect = containerRef.current.getBoundingClientRect();
-    const pixelScale = Math.min((rect.width - 60) / width, (rect.height - 60) / height);
-    const initialZoom = Math.max(1, Math.min(32, Math.floor(pixelScale)));
-    onZoomChange(initialZoom);
-    setPanOffset({
-      x: (rect.width - width * initialZoom) / 2,
-      y: (rect.height - height * initialZoom) / 2,
-    });
+    let rafId: number | null = null;
+
+    const tryCenter = () => {
+      const el = containerRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      // 레이아웃이 아직 잡히지 않아 컨테이너 크기가 0이면 NaN/Infinity 배율로
+      // 이어질 수 있으므로, 다음 프레임에 다시 시도한다.
+      if (rect.width === 0 || rect.height === 0) {
+        rafId = requestAnimationFrame(tryCenter);
+        return;
+      }
+      const pixelScale = Math.min((rect.width - 60) / width, (rect.height - 60) / height);
+      const initialZoom = Math.max(1, Math.min(32, Math.floor(pixelScale)));
+      onZoomChange(initialZoom);
+      setPanOffset({
+        x: (rect.width - width * initialZoom) / 2,
+        y: (rect.height - height * initialZoom) / 2,
+      });
+    };
+
+    tryCenter();
+
+    return () => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
+    };
   }, [width, height]);
 
   // 스크린 좌표 ➔ 캔버스 픽셀 좌표 변환
@@ -182,7 +197,7 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
 
     // 4. 그리드 라인 그리기
     if (showGrid && zoom >= 4) {
-      ctx.strokeStyle = isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.08)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
       ctx.lineWidth = 1;
       ctx.beginPath();
 
@@ -211,7 +226,7 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
 
     // 6. 커서 호버 박스 미리보기
     if (cursorPos && !isPanning) {
-      ctx.strokeStyle = isDark ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
       ctx.lineWidth = 1.5;
       const stamp = getBrushStamp(cursorPos.x, cursorPos.y, brushSize);
       stamp.forEach(pt => {
@@ -226,7 +241,7 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
         }
       });
     }
-  }, [layers, groups, width, height, zoom, showGrid, isDark, horizontalSymmetry, cursorPos, isPanning, brushSize, onionSkinEnabled, onionSkinPixels]);
+  }, [layers, groups, width, height, zoom, showGrid, horizontalSymmetry, cursorPos, isPanning, brushSize, onionSkinEnabled, onionSkinPixels]);
 
   useEffect(() => {
     render();
@@ -330,14 +345,16 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
 
     if (currentTool === 'bucket') {
       const filled = floodFill(activeLayer.pixels, width, height, pt.x, pt.y, paintColor);
-      onUpdateLayerPixels(activeLayer.id, filled, true, '페인트 채우기');
+      if (filled !== activeLayer.pixels) {
+        onUpdateLayerPixels(activeLayer.id, filled, true, '페인트 채우기');
+      }
       isDrawingRef.current = false;
       return;
     }
 
     if (currentTool === 'brush' || currentTool === 'eraser') {
       const newPixels = applyBrushPixels(activeLayer.pixels, pt.x, pt.y, paintColor);
-      onUpdateLayerPixels(activeLayer.id, newPixels, false);
+      onUpdateLayerPixels(activeLayer.id, newPixels, true, `${currentTool} 스트로크`);
       render();
     }
   };
@@ -420,9 +437,9 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
     if (previewPixelsRef.current) {
       onUpdateLayerPixels(activeLayer.id, previewPixelsRef.current, true, `${currentTool} 그리기`);
       previewPixelsRef.current = null;
-    } else if (currentTool === 'brush' || currentTool === 'eraser') {
-      onUpdateLayerPixels(activeLayer.id, activeLayer.pixels, true, `${currentTool} 스트로크`);
     }
+    // 브러시/지우개 획은 pointerDown 시점에 이미 히스토리가 기록되었고
+    // 이후 픽셀은 pointerMove에서 계속 반영되어 왔으므로 여기서 추가로 기록하지 않는다.
 
     startPointRef.current = null;
     lastPointRef.current = null;
@@ -507,18 +524,16 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
           if (previewPixelsRef.current) {
             onUpdateLayerPixels(activeLayer.id, previewPixelsRef.current, true, '도형 그리기');
             previewPixelsRef.current = null;
-          } else {
-            onUpdateLayerPixels(activeLayer.id, activeLayer.pixels, true, '스트로크');
           }
+          // 브러시/지우개 획은 pointerDown 시점에 이미 히스토리가 기록되었으므로
+          // 여기서 추가로 기록하지 않는다 (handlePointerUp과 동일한 로직).
         }
       }}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
       onContextMenu={(e) => e.preventDefault()}
-      className={`relative flex-1 w-full h-full overflow-hidden select-none cursor-crosshair ${
-        isDark ? 'bg-[#050505]' : 'bg-gray-100'
-      }`}
+      className="relative flex-1 w-full h-full overflow-hidden select-none touch-none cursor-crosshair bg-[#050505]"
     >
       {/* 캔버스 및 투명 체크판 컨테이너 */}
       <div
@@ -527,9 +542,7 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
           width: width * zoom,
           height: height * zoom,
         }}
-        className={`absolute shadow-2xl border border-gray-800 ${
-          isDark ? 'bg-checkered' : 'bg-checkered-light'
-        }`}
+        className="absolute shadow-2xl border border-gray-800 bg-checkered"
       >
         <canvas
           ref={canvasRef}

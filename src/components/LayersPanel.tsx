@@ -196,7 +196,11 @@ export const LayersPanel: React.FC<LayersPanelProps> = ({
                     {group.visible ? <Eye className="w-3.5 h-3.5 text-emerald-400" /> : <EyeOff className="w-3.5 h-3.5 text-gray-600" />}
                   </button>
                   <button
-                    onClick={() => onDeleteGroup(group.id)}
+                    onClick={() => {
+                      if (window.confirm(`"${group.name}" 그룹을 삭제할까요? 내부 레이어는 유지됩니다.`)) {
+                        onDeleteGroup(group.id);
+                      }
+                    }}
                     className="p-1 rounded text-gray-500 hover:text-rose-400"
                     title="그룹 삭제 (내부 레이어는 유지)"
                   >
@@ -225,20 +229,47 @@ export const LayersPanel: React.FC<LayersPanelProps> = ({
         {ungroupedLayers.map(layer => renderLayerItem(layer))}
       </div>
 
+      {/* 선택된 레이어를 그룹에 배정 */}
+      {activeLayer && groups.length > 0 && (
+        <div className="border-t border-gray-800 pt-2 flex items-center gap-1.5 text-gray-400">
+          <span className="text-[10px] font-mono uppercase shrink-0">그룹</span>
+          <select
+            value={activeLayer.groupId || ''}
+            onChange={(e) => onAssignLayerToGroup(activeLayer.id, e.target.value || null)}
+            className="flex-1 bg-[#161616] border border-gray-800 rounded text-xs px-1.5 py-1 text-gray-200 focus:outline-none focus:border-emerald-500"
+          >
+            <option value="">그룹 없음</option>
+            {groups.map(g => (
+              <option key={g.id} value={g.id}>{g.name}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
       {/* 선택된 레이어 하단 제어 바 (위/아래 이동, 복제, 병합, 삭제) */}
       {activeLayer && (
         <div className="border-t border-gray-800 pt-2 flex items-center justify-between text-gray-400">
           <div className="flex items-center gap-1">
             <button
               onClick={() => onMoveLayer(activeLayer.id, 'up')}
-              className="p-1.5 rounded hover:bg-gray-800 hover:text-white transition-colors"
+              disabled={layers.indexOf(activeLayer) === layers.length - 1}
+              className={`p-1.5 rounded transition-colors ${
+                layers.indexOf(activeLayer) < layers.length - 1
+                  ? 'hover:bg-gray-800 hover:text-white text-gray-400'
+                  : 'text-gray-600 cursor-not-allowed'
+              }`}
               title="레이어 위로 이동"
             >
               <ArrowUp className="w-3.5 h-3.5" />
             </button>
             <button
               onClick={() => onMoveLayer(activeLayer.id, 'down')}
-              className="p-1.5 rounded hover:bg-gray-800 hover:text-white transition-colors"
+              disabled={layers.indexOf(activeLayer) === 0}
+              className={`p-1.5 rounded transition-colors ${
+                layers.indexOf(activeLayer) > 0
+                  ? 'hover:bg-gray-800 hover:text-white text-gray-400'
+                  : 'text-gray-600 cursor-not-allowed'
+              }`}
               title="레이어 아래로 이동"
             >
               <ArrowDown className="w-3.5 h-3.5" />
@@ -249,7 +280,7 @@ export const LayersPanel: React.FC<LayersPanelProps> = ({
             <button
               onClick={() => onDuplicateLayer(activeLayer.id)}
               className="p-1.5 rounded hover:bg-gray-800 hover:text-emerald-400 transition-colors"
-              title="레이어 복제"
+              title="레이어 복제 (Ctrl+D)"
             >
               <Copy className="w-3.5 h-3.5" />
             </button>
@@ -257,8 +288,8 @@ export const LayersPanel: React.FC<LayersPanelProps> = ({
               onClick={() => onMergeLayerDown(activeLayer.id)}
               disabled={layers.indexOf(activeLayer) === 0}
               className={`p-1.5 rounded transition-colors ${
-                layers.indexOf(activeLayer) > 0 
-                  ? 'hover:bg-gray-800 hover:text-emerald-400 text-gray-400' 
+                layers.indexOf(activeLayer) > 0
+                  ? 'hover:bg-gray-800 hover:text-emerald-400 text-gray-400'
                   : 'text-gray-600 cursor-not-allowed'
               }`}
               title="아래 레이어와 병합"
@@ -266,14 +297,18 @@ export const LayersPanel: React.FC<LayersPanelProps> = ({
               <Combine className="w-3.5 h-3.5" />
             </button>
             <button
-              onClick={() => onDeleteLayer(activeLayer.id)}
+              onClick={() => {
+                if (window.confirm(`"${activeLayer.name}" 레이어를 삭제할까요?`)) {
+                  onDeleteLayer(activeLayer.id);
+                }
+              }}
               disabled={layers.length <= 1}
               className={`p-1.5 rounded transition-colors ${
-                layers.length > 1 
-                  ? 'hover:bg-rose-950/40 hover:text-rose-400 text-gray-400' 
+                layers.length > 1
+                  ? 'hover:bg-rose-950/40 hover:text-rose-400 text-gray-400'
                   : 'text-gray-600 cursor-not-allowed'
               }`}
-              title="레이어 삭제"
+              title="레이어 삭제 (Delete)"
             >
               <Trash2 className="w-3.5 h-3.5" />
             </button>
@@ -290,6 +325,15 @@ export const LayersPanel: React.FC<LayersPanelProps> = ({
       <div
         key={layer.id}
         onClick={() => onSelectLayer(layer.id)}
+        role="button"
+        tabIndex={0}
+        aria-pressed={isActive}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onSelectLayer(layer.id);
+          }
+        }}
         className={`flex items-center justify-between px-2.5 py-2 rounded border transition-all cursor-pointer ${
           isActive
             ? 'bg-emerald-500/10 border-emerald-500/30 shadow-sm text-emerald-100'

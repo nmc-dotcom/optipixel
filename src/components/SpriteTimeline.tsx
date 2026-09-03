@@ -362,6 +362,16 @@ export const SpriteTimeline: React.FC<SpriteTimelineProps> = ({
                 <div
                   key={layer.id}
                   onClick={() => onSelectFrame(layer.id)}
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={isActive}
+                  aria-label={`프레임 ${index + 1}`}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      onSelectFrame(layer.id);
+                    }
+                  }}
                   className={`group relative flex-shrink-0 flex flex-col items-center justify-between p-1.5 rounded-lg border cursor-pointer transition-all ${
                     isActive
                       ? 'bg-emerald-950/40 border-emerald-500 shadow-md ring-1 ring-emerald-500/50'
@@ -405,7 +415,9 @@ export const SpriteTimeline: React.FC<SpriteTimelineProps> = ({
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            onDeleteFrame(layer.id);
+                            if (window.confirm(`프레임 #${index + 1}을(를) 삭제할까요?`)) {
+                              onDeleteFrame(layer.id);
+                            }
                           }}
                           className="p-0.5 hover:text-red-400 text-gray-500"
                           title="프레임 삭제"
