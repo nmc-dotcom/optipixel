@@ -1,0 +1,56 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  
+  code, pre, .font-mono {
+    font-family: 'JetBrains Mono', monospace;
+  }
+}
+
+/* 픽셀 투명 체크 보드 패턴 - Elegant Dark Theme */
+.bg-checkered {
+  background-image: linear-gradient(45deg, #111111 25%, transparent 25%),
+                    linear-gradient(-45deg, #111111 25%, transparent 25%),
+                    linear-gradient(45deg, transparent 75%, #111111 75%),
+                    linear-gradient(-45deg, transparent 75%, #111111 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
+  background-color: #050505;
+}
+
+.bg-checkered-light {
+  background-image: linear-gradient(45deg, #e4e4e7 25%, transparent 25%),
+                    linear-gradient(-45deg, #e4e4e7 25%, transparent 25%),
+                    linear-gradient(45deg, transparent 75%, #e4e4e7 75%),
+                    linear-gradient(-45deg, transparent 75%, #e4e4e7 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
+  background-color: #f4f4f5;
+}
+
+/* 픽셀 렌더링 최적화 */
+.pixelated {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+/* 커스텀 스크롤바 */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: #0d0d0d;
+}
+::-webkit-scrollbar-thumb {
+  background: #27272a;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3f3f46;
+}

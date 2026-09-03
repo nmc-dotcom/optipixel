@@ -1,0 +1,770 @@
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { 
+  CanvasDimensions, 
+  HistoryStep, 
+  Layer, 
+  LayerGroup, 
+  PalettePreset, 
+  ToolType 
+} from './types';
+import { DEFAULT_PALETTES, generateInitialPixels } from './constants/presets';
+import { Navbar } from './components/Navbar';
+import { Toolbar } from './components/Toolbar';
+import { ColorPalettePanel } from './components/ColorPalettePanel';
+import { LayersPanel } from './components/LayersPanel';
+import { PixelCanvas } from './components/PixelCanvas';
+import { SpriteTimeline } from './components/SpriteTimeline';
+import { ImageToPixelModal } from './components/ImageToPixelModal';
+import { CanvasSizeModal } from './components/CanvasSizeModal';
+import { ExportModal } from './components/ExportModal';
+import { CodeExportModal } from './components/CodeExportModal';
+import { FiltersModal } from './components/FiltersModal';
+
+const MAX_HISTORY = 35;
+const STORAGE_PALETTES_KEY = 'pixelcraft_custom_palettes';
+
+export default function App() {
+  // 1. 캔버스 차원 및 데이터 상태
+  const [dimensions, setDimensions] = useState<CanvasDimensions>({ width: 24, height: 24 });
+  const [groups, setGroups] = useState<LayerGroup[]>([]);
+  const [layers, setLayers] = useState<Layer[]>(() => {
+    const initialPixels = generateInitialPixels(24, 24);
+    return [
+      {
+        id: 'layer-base',
+        name: '레이어 1 (메인)',
+        groupId: null,
+        visible: true,
+        locked: false,
+        opacity: 1.0,
+        pixels: initialPixels,
+      }
+    ];
+  });
+  const [activeLayerId, setActiveLayerId] = useState<string>('layer-base');
+
+  // 2. Undo / Redo 실행 취소 스택
+  const [historyPast, setHistoryPast] = useState<HistoryStep[]>([]);
+  const [historyFuture, setHistoryFuture] = useState<HistoryStep[]>([]);
+
+  // 3. 툴바 & 브러시 상태
+  const [currentTool, setCurrentTool] = useState<ToolType>('brush');
+  const [brushSize, setBrushSize] = useState<number>(1);
+  const [fillShape, setFillShape] = useState<boolean>(false);
+  const [horizontalSymmetry, setHorizontalSymmetry] = useState<boolean>(false);
+  const [showGrid, setShowGrid] = useState<boolean>(true);
+  const [zoom, setZoom] = useState<number>(16);
+
+  // 4. 팔레트 및 색상 상태
+  const [primaryColor, setPrimaryColor] = useState<string>('#10b981');
+  const [secondaryColor, setSecondaryColor] = useState<string>('#064e3b');
+  const [activePalette, setActivePalette] = useState<PalettePreset>(DEFAULT_PALETTES[0]);
+  const [customPalettes, setCustomPalettes] = useState<PalettePreset[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_PALETTES_KEY);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // 5. 다크 모드
+  const [isDark, setIsDark] = useState<boolean>(true);
+
+  // 6. 모바일 사이드 시트 탭
+  const [activeMobileTab, setActiveMobileTab] = useState<'none' | 'layers' | 'palette'>('none');
+
+  // 7. 모달 오픈 상태
+  const [isConvertModalOpen, setIsConvertModalOpen] = useState(false);
+  const [isSizeModalOpen, setIsSizeModalOpen] = useState(false);
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [isCodeModalOpen, setIsCodeModalOpen] = useState(false);
+  const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
+
+  // 8. 스프라이트 애니메이션 & 어니언 스킨 상태
+  const [onionSkinEnabled, setOnionSkinEnabled] = useState<boolean>(false);
+
+  // 현재 활성 프레임(레이어)의 이전 프레임 잔상 픽셀 연산
+  const onionSkinPixels = useMemo(() => {
+    if (!onionSkinEnabled) return null;
+    const activeIdx = layers.findIndex(l => l.id === activeLayerId);
+    if (activeIdx <= 0) return null;
+    return layers[activeIdx - 1]?.pixels || null;
+  }, [layers, activeLayerId, onionSkinEnabled]);
+
+  // 다크 모드 DOM 동기화
+  useEffect(() => {
+    if (isDark) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [isDark]);
+
+  // 커스텀 팔레트 로컬 저장소 동기화
+  const handleSaveCustomPalette = (newPalette: PalettePreset) => {
+    setCustomPalettes(prev => {
+      const filtered = prev.filter(p => p.id !== newPalette.id);
+      const updated = [...filtered, newPalette];
+      try {
+        localStorage.setItem(STORAGE_PALETTES_KEY, JSON.stringify(updated));
+      } catch (err) {
+        console.error(err);
+      }
+      return updated;
+    });
+  };
+
+  const handleDeleteCustomPalette = (id: string) => {
+    setCustomPalettes(prev => {
+      const updated = prev.filter(p => p.id !== id);
+      try {
+        localStorage.setItem(STORAGE_PALETTES_KEY, JSON.stringify(updated));
+      } catch (err) {
+        console.error(err);
+      }
+      return updated;
+    });
+    if (activePalette.id === id) {
+      setActivePalette(DEFAULT_PALETTES[0]);
+    }
+  };
+
+  // 히스토리 스냅샷 푸시
+  const pushHistory = useCallback((desc: string = '변경') => {
+    setHistoryPast(prev => {
+      const currentStep: HistoryStep = {
+        layers: JSON.parse(JSON.stringify(layers)),
+        groups: JSON.parse(JSON.stringify(groups)),
+        width: dimensions.width,
+        height: dimensions.height,
+        description: desc,
+      };
+      const updated = [...prev, currentStep];
+      if (updated.length > MAX_HISTORY) {
+        return updated.slice(updated.length - MAX_HISTORY);
+      }
+      return updated;
+    });
+    setHistoryFuture([]);
+  }, [layers, groups, dimensions]);
+
+  // 실행 취소 (Undo)
+  const handleUndo = useCallback(() => {
+    if (historyPast.length === 0) return;
+
+    const previousStep = historyPast[historyPast.length - 1];
+    const currentStep: HistoryStep = {
+      layers: JSON.parse(JSON.stringify(layers)),
+      groups: JSON.parse(JSON.stringify(groups)),
+      width: dimensions.width,
+      height: dimensions.height,
+      description: '되돌리기 전',
+    };
+
+    setHistoryFuture(prev => [currentStep, ...prev]);
+    setHistoryPast(prev => prev.slice(0, prev.length - 1));
+
+    setLayers(previousStep.layers);
+    setGroups(previousStep.groups);
+    setDimensions({ width: previousStep.width, height: previousStep.height });
+
+    // 활성 레이어가 사라졌을 경우 안전 보정
+    if (!previousStep.layers.some(l => l.id === activeLayerId) && previousStep.layers.length > 0) {
+      setActiveLayerId(previousStep.layers[0].id);
+    }
+  }, [historyPast, layers, groups, dimensions, activeLayerId]);
+
+  // 다시 실행 (Redo)
+  const handleRedo = useCallback(() => {
+    if (historyFuture.length === 0) return;
+
+    const nextStep = historyFuture[0];
+    const currentStep: HistoryStep = {
+      layers: JSON.parse(JSON.stringify(layers)),
+      groups: JSON.parse(JSON.stringify(groups)),
+      width: dimensions.width,
+      height: dimensions.height,
+      description: '다시 실행 전',
+    };
+
+    setHistoryPast(prev => [...prev, currentStep]);
+    setHistoryFuture(prev => prev.slice(1));
+
+    setLayers(nextStep.layers);
+    setGroups(nextStep.groups);
+    setDimensions({ width: nextStep.width, height: nextStep.height });
+
+    if (!nextStep.layers.some(l => l.id === activeLayerId) && nextStep.layers.length > 0) {
+      setActiveLayerId(nextStep.layers[0].id);
+    }
+  }, [historyFuture, layers, groups, dimensions, activeLayerId]);
+
+  // 단축키 이벤트 리스너 (Undo, Redo, Tools)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // 모달 입력창 등 focus 시 무시
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName)) {
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        handleUndo();
+      } else if (
+        ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') ||
+        ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'z')
+      ) {
+        e.preventDefault();
+        handleRedo();
+      } else {
+        switch (e.key.toLowerCase()) {
+          case 'b': setCurrentTool('brush'); break;
+          case 'e': setCurrentTool('eraser'); break;
+          case 'g': setCurrentTool('bucket'); break;
+          case 'i': setCurrentTool('picker'); break;
+          case 'l': setCurrentTool('line'); break;
+          case 'u': setCurrentTool('rect'); break;
+          case 'c': setCurrentTool('circle'); break;
+          case 'm': setCurrentTool('move'); break;
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleUndo, handleRedo]);
+
+  // 레이어 픽셀 업데이트
+  const handleUpdateLayerPixels = (
+    layerId: string,
+    newPixels: string[],
+    recordHistory: boolean = false,
+    description: string = '픽셀 편집'
+  ) => {
+    if (recordHistory) {
+      pushHistory(description);
+    }
+
+    setLayers(prev => prev.map(layer => {
+      if (layer.id === layerId) {
+        return { ...layer, pixels: newPixels };
+      }
+      return layer;
+    }));
+  };
+
+  // 레이어 추가
+  const handleAddLayer = (groupId?: string | null) => {
+    pushHistory('새 레이어 추가');
+    const newId = `layer-${Date.now()}`;
+    const newLayer: Layer = {
+      id: newId,
+      name: `레이어 ${layers.length + 1}`,
+      groupId: groupId || null,
+      visible: true,
+      locked: false,
+      opacity: 1.0,
+      pixels: new Array(dimensions.width * dimensions.height).fill(''),
+    };
+    setLayers(prev => [...prev, newLayer]);
+    setActiveLayerId(newId);
+  };
+
+  // 레이어 삭제
+  const handleDeleteLayer = (id: string) => {
+    if (layers.length <= 1) return;
+    pushHistory('레이어 삭제');
+    const filtered = layers.filter(l => l.id !== id);
+    setLayers(filtered);
+    if (activeLayerId === id) {
+      setActiveLayerId(filtered[filtered.length - 1].id);
+    }
+  };
+
+  // 레이어 복제
+  const handleDuplicateLayer = (id: string) => {
+    const target = layers.find(l => l.id === id);
+    if (!target) return;
+    pushHistory('레이어 복제');
+    const newId = `layer-${Date.now()}`;
+    const cloned: Layer = {
+      ...target,
+      id: newId,
+      name: `${target.name} (복사본)`,
+      pixels: [...target.pixels],
+    };
+    setLayers(prev => {
+      const idx = prev.findIndex(l => l.id === id);
+      const next = [...prev];
+      next.splice(idx + 1, 0, cloned);
+      return next;
+    });
+    setActiveLayerId(newId);
+  };
+
+  // 레이어 아래와 병합
+  const handleMergeLayerDown = (id: string) => {
+    const idx = layers.findIndex(l => l.id === id);
+    if (idx <= 0) return; // 맨 밑 레이어는 병합 불가
+    pushHistory('아래 레이어와 병합');
+
+    const top = layers[idx];
+    const bottom = layers[idx - 1];
+
+    // 픽셀 병합 (top over bottom)
+    const mergedPixels = [...bottom.pixels];
+    for (let i = 0; i < top.pixels.length; i++) {
+      if (top.pixels[i]) {
+        mergedPixels[i] = top.pixels[i];
+      }
+    }
+
+    const mergedLayer: Layer = {
+      ...bottom,
+      pixels: mergedPixels,
+    };
+
+    setLayers(prev => {
+      const next = [...prev];
+      next.splice(idx - 1, 2, mergedLayer);
+      return next;
+    });
+    setActiveLayerId(mergedLayer.id);
+  };
+
+  // 레이어 순서 이동 (위/아래)
+  const handleMoveLayer = (id: string, direction: 'up' | 'down') => {
+    const idx = layers.findIndex(l => l.id === id);
+    if (idx === -1) return;
+    if (direction === 'up' && idx === layers.length - 1) return;
+    if (direction === 'down' && idx === 0) return;
+
+    pushHistory(`레이어 ${direction === 'up' ? '위' : '아래'}로 이동`);
+    const targetIdx = direction === 'up' ? idx + 1 : idx - 1;
+    const next = [...layers];
+    const temp = next[idx];
+    next[idx] = next[targetIdx];
+    next[targetIdx] = temp;
+    setLayers(next);
+  };
+
+  // 레이어 가시성 / 잠금 / 불투명도 / 이름
+  const handleToggleLayerVisibility = (id: string) => {
+    setLayers(prev => prev.map(l => l.id === id ? { ...l, visible: !l.visible } : l));
+  };
+
+  const handleToggleLayerLock = (id: string) => {
+    setLayers(prev => prev.map(l => l.id === id ? { ...l, locked: !l.locked } : l));
+  };
+
+  const handleChangeLayerOpacity = (id: string, opacity: number) => {
+    setLayers(prev => prev.map(l => l.id === id ? { ...l, opacity } : l));
+  };
+
+  const handleRenameLayer = (id: string, name: string) => {
+    setLayers(prev => prev.map(l => l.id === id ? { ...l, name } : l));
+  };
+
+  const handleAssignLayerToGroup = (layerId: string, groupId: string | null) => {
+    setLayers(prev => prev.map(l => l.id === layerId ? { ...l, groupId } : l));
+  };
+
+  // 그룹 관리
+  const handleAddGroup = () => {
+    pushHistory('새 그룹 생성');
+    const newGroup: LayerGroup = {
+      id: `group-${Date.now()}`,
+      name: `그룹 ${groups.length + 1}`,
+      visible: true,
+      collapsed: false,
+    };
+    setGroups(prev => [...prev, newGroup]);
+  };
+
+  const handleDeleteGroup = (id: string) => {
+    pushHistory('그룹 삭제');
+    setGroups(prev => prev.filter(g => g.id !== id));
+    // 해당 그룹 소속 레이어들을 ungroup으로 변경
+    setLayers(prev => prev.map(l => l.groupId === id ? { ...l, groupId: null } : l));
+  };
+
+  const handleToggleGroupVisibility = (id: string) => {
+    setGroups(prev => prev.map(g => g.id === id ? { ...g, visible: !g.visible } : g));
+  };
+
+  const handleToggleGroupCollapse = (id: string) => {
+    setGroups(prev => prev.map(g => g.id === id ? { ...g, collapsed: !g.collapsed } : g));
+  };
+
+  const handleRenameGroup = (id: string, name: string) => {
+    setGroups(prev => prev.map(g => g.id === id ? { ...g, name } : g));
+  };
+
+  // 캔버스 크기 변경 리사이징 엔진
+  const handleResizeCanvas = (
+    newWidth: number,
+    newHeight: number,
+    mode: 'crop-expand' | 'rescale' | 'clear'
+  ) => {
+    pushHistory(`캔버스 크기 변경 (${newWidth}x${newHeight})`);
+
+    const oldW = dimensions.width;
+    const oldH = dimensions.height;
+
+    setLayers(prevLayers => {
+      return prevLayers.map(layer => {
+        const newPixels = new Array(newWidth * newHeight).fill('');
+
+        if (mode === 'clear') {
+          return { ...layer, pixels: newPixels };
+        }
+
+        if (mode === 'crop-expand') {
+          for (let y = 0; y < Math.min(oldH, newHeight); y++) {
+            for (let x = 0; x < Math.min(oldW, newWidth); x++) {
+              newPixels[y * newWidth + x] = layer.pixels[y * oldW + x];
+            }
+          }
+        } else if (mode === 'rescale') {
+          // Nearest-Neighbor Rescale
+          for (let y = 0; y < newHeight; y++) {
+            for (let x = 0; x < newWidth; x++) {
+              const srcX = Math.floor((x / newWidth) * oldW);
+              const srcY = Math.floor((y / newHeight) * oldH);
+              newPixels[y * newWidth + x] = layer.pixels[srcY * oldW + srcX] || '';
+            }
+          }
+        }
+
+        return { ...layer, pixels: newPixels };
+      });
+    });
+
+    setDimensions({ width: newWidth, height: newHeight });
+  };
+
+  // 이미지 도트 변환 결과 적용
+  const handleImageConversion = (
+    pixels: string[],
+    targetWidth: number,
+    targetHeight: number,
+    asNewLayer: boolean
+  ) => {
+    pushHistory('이미지 도트 변환 적용');
+
+    if (!asNewLayer || targetWidth !== dimensions.width || targetHeight !== dimensions.height) {
+      // 캔버스 크기도 타겟 해상도로 맞춤
+      setDimensions({ width: targetWidth, height: targetHeight });
+      const newLayer: Layer = {
+        id: `layer-${Date.now()}`,
+        name: '도트 변환 레이어',
+        groupId: null,
+        visible: true,
+        locked: false,
+        opacity: 1.0,
+        pixels,
+      };
+      setLayers([newLayer]);
+      setActiveLayerId(newLayer.id);
+    } else {
+      // 동일 해상도 새 레이어로 추가
+      const newLayer: Layer = {
+        id: `layer-${Date.now()}`,
+        name: `도트 변환 #${layers.length + 1}`,
+        groupId: null,
+        visible: true,
+        locked: false,
+        opacity: 1.0,
+        pixels,
+      };
+      setLayers(prev => [...prev, newLayer]);
+      setActiveLayerId(newLayer.id);
+    }
+  };
+
+  // 필터 적용
+  const handleApplyLayerFilter = (
+    updatedLayers: { id: string; pixels: string[] }[],
+    description: string
+  ) => {
+    pushHistory(`필터 적용 (${description})`);
+    setLayers(prev => prev.map(layer => {
+      const match = updatedLayers.find(u => u.id === layer.id);
+      if (match) {
+        return { ...layer, pixels: match.pixels };
+      }
+      return layer;
+    }));
+  };
+
+  // 필터 실시간 캔버스 미리보기 (히스토리 미기록, 즉각 픽셀 반영)
+  const handlePreviewLayerFilter = useCallback((
+    updatedLayers: { id: string; pixels: string[] }[]
+  ) => {
+    setLayers(prev => prev.map(layer => {
+      const match = updatedLayers.find(u => u.id === layer.id);
+      if (match) {
+        return { ...layer, pixels: match.pixels };
+      }
+      return layer;
+    }));
+  }, []);
+
+  // 현재 활성 레이어 지우기
+  const handleClearActiveLayer = () => {
+    const active = layers.find(l => l.id === activeLayerId);
+    if (!active || active.locked) return;
+    pushHistory('레이어 비우기');
+    const emptyPixels = new Array(dimensions.width * dimensions.height).fill('');
+    handleUpdateLayerPixels(activeLayerId, emptyPixels, false);
+  };
+
+  return (
+    <div className={`h-screen w-screen flex flex-col overflow-hidden ${isDark ? 'dark bg-[#0A0A0A] text-gray-300' : 'bg-gray-50 text-gray-900'}`}>
+      {/* 1. 상단 내비게이션 바 */}
+      <Navbar
+        canvasWidth={dimensions.width}
+        canvasHeight={dimensions.height}
+        canUndo={historyPast.length > 0}
+        canRedo={historyFuture.length > 0}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+        onOpenSizeModal={() => setIsSizeModalOpen(true)}
+        onOpenConvertModal={() => setIsConvertModalOpen(true)}
+        onOpenFiltersModal={() => setIsFiltersModalOpen(!isFiltersModalOpen)}
+        isFiltersOpen={isFiltersModalOpen}
+        onOpenCodeModal={() => setIsCodeModalOpen(true)}
+        onOpenExportModal={() => setIsExportModalOpen(true)}
+        onClearCanvas={handleClearActiveLayer}
+        isDark={isDark}
+        onToggleTheme={() => setIsDark(!isDark)}
+        onToggleMobileLayers={() => setActiveMobileTab(activeMobileTab === 'layers' ? 'none' : 'layers')}
+        onToggleMobilePalette={() => setActiveMobileTab(activeMobileTab === 'palette' ? 'none' : 'palette')}
+        activeMobileTab={activeMobileTab}
+      />
+
+      {/* 2. 메인 워크스페이스 (데스크탑: 좌측 팔레트, 중앙 캔버스, 우측 레이어) */}
+      <div className="flex-1 flex flex-row overflow-hidden relative">
+        {/* 데스크탑 좌측 도구 바 */}
+        <Toolbar
+          currentTool={currentTool}
+          onChangeTool={setCurrentTool}
+          brushSize={brushSize}
+          onChangeBrushSize={setBrushSize}
+          fillShape={fillShape}
+          onToggleFillShape={() => setFillShape(!fillShape)}
+          horizontalSymmetry={horizontalSymmetry}
+          onToggleHorizontalSymmetry={() => setHorizontalSymmetry(!horizontalSymmetry)}
+          showGrid={showGrid}
+          onToggleGrid={() => setShowGrid(!showGrid)}
+          zoom={zoom}
+          onZoomIn={() => setZoom(prev => Math.min(64, prev + 2))}
+          onZoomOut={() => setZoom(prev => Math.max(1, prev - 2))}
+          onResetZoom={() => setZoom(16)}
+        />
+
+        {/* 데스크탑 좌측 팔레트 독 */}
+        <div className="hidden md:block h-full shrink-0">
+          <ColorPalettePanel
+            primaryColor={primaryColor}
+            secondaryColor={secondaryColor}
+            onSelectPrimaryColor={setPrimaryColor}
+            onSelectSecondaryColor={setSecondaryColor}
+            activePalette={activePalette}
+            onChangePalette={setActivePalette}
+            customPalettes={customPalettes}
+            onSaveCustomPalette={handleSaveCustomPalette}
+            onDeleteCustomPalette={handleDeleteCustomPalette}
+          />
+        </div>
+
+        {/* 중앙 인터랙티브 픽셀 캔버스 및 하단 스프라이트 타임라인 */}
+        <main className="flex-1 h-full relative flex flex-col overflow-hidden">
+          <div className="flex-1 relative overflow-hidden">
+            <PixelCanvas
+              layers={layers}
+              groups={groups}
+              activeLayerId={activeLayerId}
+              width={dimensions.width}
+              height={dimensions.height}
+              currentTool={currentTool}
+              primaryColor={primaryColor}
+              secondaryColor={secondaryColor}
+              brushSize={brushSize}
+              fillShape={fillShape}
+              horizontalSymmetry={horizontalSymmetry}
+              showGrid={showGrid}
+              zoom={zoom}
+              onZoomChange={setZoom}
+              onUpdateLayerPixels={handleUpdateLayerPixels}
+              onPickColor={setPrimaryColor}
+              isDark={isDark}
+              onionSkinEnabled={onionSkinEnabled}
+              onionSkinPixels={onionSkinPixels}
+            />
+          </div>
+
+          {/* 스프라이트 애니메이션 프레임 타임라인 */}
+          <SpriteTimeline
+            layers={layers}
+            activeLayerId={activeLayerId}
+            width={dimensions.width}
+            height={dimensions.height}
+            onSelectFrame={setActiveLayerId}
+            onAddFrame={() => handleAddLayer()}
+            onDuplicateFrame={handleDuplicateLayer}
+            onDeleteFrame={handleDeleteLayer}
+            onMoveFrame={(id, dir) => handleMoveLayer(id, dir === 'left' ? 'down' : 'up')}
+            onionSkinEnabled={onionSkinEnabled}
+            onToggleOnionSkin={() => setOnionSkinEnabled(!onionSkinEnabled)}
+            onOpenExportModal={() => setIsExportModalOpen(true)}
+          />
+        </main>
+
+        {/* 데스크탑 우측 레이어 독 */}
+        <div className="hidden md:block h-full shrink-0">
+          <LayersPanel
+            layers={layers}
+            groups={groups}
+            activeLayerId={activeLayerId}
+            onSelectLayer={setActiveLayerId}
+            onAddLayer={handleAddLayer}
+            onDeleteLayer={handleDeleteLayer}
+            onDuplicateLayer={handleDuplicateLayer}
+            onMergeLayerDown={handleMergeLayerDown}
+            onMoveLayer={handleMoveLayer}
+            onToggleLayerVisibility={handleToggleLayerVisibility}
+            onToggleLayerLock={handleToggleLayerLock}
+            onChangeLayerOpacity={handleChangeLayerOpacity}
+            onRenameLayer={handleRenameLayer}
+            onAssignLayerToGroup={handleAssignLayerToGroup}
+            onAddGroup={handleAddGroup}
+            onDeleteGroup={handleDeleteGroup}
+            onToggleGroupVisibility={handleToggleGroupVisibility}
+            onToggleGroupCollapse={handleToggleGroupCollapse}
+            onRenameGroup={handleRenameGroup}
+          />
+        </div>
+
+        {/* 모바일 팝업 드로어 (팔레트 또는 레이어 활성화 시) */}
+        {activeMobileTab !== 'none' && (
+          <div className="md:hidden absolute inset-x-0 bottom-16 top-0 z-40 bg-[#0A0A0A]/95 backdrop-blur-lg flex flex-col animate-in fade-in slide-in-from-bottom-5 duration-200">
+            {activeMobileTab === 'palette' && (
+              <ColorPalettePanel
+                primaryColor={primaryColor}
+                secondaryColor={secondaryColor}
+                onSelectPrimaryColor={(c) => {
+                  setPrimaryColor(c);
+                  setActiveMobileTab('none');
+                }}
+                onSelectSecondaryColor={(c) => {
+                  setSecondaryColor(c);
+                  setActiveMobileTab('none');
+                }}
+                activePalette={activePalette}
+                onChangePalette={setActivePalette}
+                customPalettes={customPalettes}
+                onSaveCustomPalette={handleSaveCustomPalette}
+                onDeleteCustomPalette={handleDeleteCustomPalette}
+                onCloseMobile={() => setActiveMobileTab('none')}
+              />
+            )}
+            {activeMobileTab === 'layers' && (
+              <LayersPanel
+                layers={layers}
+                groups={groups}
+                activeLayerId={activeLayerId}
+                onSelectLayer={(id) => {
+                  setActiveLayerId(id);
+                }}
+                onAddLayer={handleAddLayer}
+                onDeleteLayer={handleDeleteLayer}
+                onDuplicateLayer={handleDuplicateLayer}
+                onMergeLayerDown={handleMergeLayerDown}
+                onMoveLayer={handleMoveLayer}
+                onToggleLayerVisibility={handleToggleLayerVisibility}
+                onToggleLayerLock={handleToggleLayerLock}
+                onChangeLayerOpacity={handleChangeLayerOpacity}
+                onRenameLayer={handleRenameLayer}
+                onAssignLayerToGroup={handleAssignLayerToGroup}
+                onAddGroup={handleAddGroup}
+                onDeleteGroup={handleDeleteGroup}
+                onToggleGroupVisibility={handleToggleGroupVisibility}
+                onToggleGroupCollapse={handleToggleGroupCollapse}
+                onRenameGroup={handleRenameGroup}
+                onCloseMobile={() => setActiveMobileTab('none')}
+              />
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Elegant Dark 하단 상태 바 */}
+      <footer className="h-7 bg-[#111111] border-t border-gray-800 px-4 flex items-center justify-between text-[10px] text-gray-500 shrink-0 font-mono select-none">
+        <div className="flex items-center gap-3">
+          <span className="flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            <span>Ready</span>
+          </span>
+          <span className="hidden sm:inline">Active: <span className="text-gray-300">{layers.find(l => l.id === activeLayerId)?.name || 'Layer'}</span></span>
+          <span>Tool: <span className="text-emerald-400 uppercase">{currentTool}</span></span>
+        </div>
+        <div className="flex items-center gap-4">
+          <span>{dimensions.width}×{dimensions.height} px</span>
+          <span>{Math.round(zoom * 100 / 16)}%</span>
+          <span className="hidden sm:inline text-gray-600">FPS: 60.0</span>
+        </div>
+      </footer>
+
+      {/* 3. 모달 오버레이들 */}
+      <ImageToPixelModal
+        isOpen={isConvertModalOpen}
+        onClose={() => setIsConvertModalOpen(false)}
+        currentWidth={dimensions.width}
+        currentHeight={dimensions.height}
+        activePaletteColors={activePalette.colors}
+        onApplyConversion={handleImageConversion}
+      />
+
+      <CanvasSizeModal
+        isOpen={isSizeModalOpen}
+        onClose={() => setIsSizeModalOpen(false)}
+        currentWidth={dimensions.width}
+        currentHeight={dimensions.height}
+        onResizeCanvas={handleResizeCanvas}
+      />
+
+      <ExportModal
+        isOpen={isExportModalOpen}
+        onClose={() => setIsExportModalOpen(false)}
+        layers={layers}
+        groups={groups}
+        width={dimensions.width}
+        height={dimensions.height}
+        onDuplicateCurrentFrame={() => handleDuplicateLayer(activeLayerId)}
+      />
+
+      <CodeExportModal
+        isOpen={isCodeModalOpen}
+        onClose={() => setIsCodeModalOpen(false)}
+        layers={layers}
+        groups={groups}
+        width={dimensions.width}
+        height={dimensions.height}
+      />
+
+      <FiltersModal
+        isOpen={isFiltersModalOpen}
+        onClose={() => setIsFiltersModalOpen(false)}
+        layers={layers}
+        activeLayerId={activeLayerId}
+        width={dimensions.width}
+        height={dimensions.height}
+        onApplyLayerFilter={handleApplyLayerFilter}
+        onPreviewLayerFilter={handlePreviewLayerFilter}
+        primaryColor={primaryColor}
+      />
+    </div>
+  );
+}
