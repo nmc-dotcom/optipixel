@@ -56,6 +56,15 @@ export const FiltersModal: React.FC<FiltersModalProps> = ({
 }) => {
   // 1. 상태 보존용 백업 (모달이 열릴 때의 원래 픽셀 스냅샷)
   const initialBackupRef = useRef<{ id: string; pixels: string[] }[]>([]);
+
+  /**
+   * 이 패널이 실제로 손댄 레이어 id.
+   *
+   * 백업은 슬라이더 계산의 기준점이라 패널이 건드린 레이어는 고정해야 하지만,
+   * 그 외 레이어까지 열었던 순간에 붙들어 두면 패널을 띄워둔 채 한 편집이
+   * 사라진다. 손대지 않은 레이어의 백업은 캔버스를 따라가게 한다.
+   */
+  const touchedLayerIdsRef = useRef<Set<string>>(new Set());
   const hasInitializedRef = useRef(false);
 
   // 2. 톤 조절 슬라이더 상태
@@ -93,7 +102,8 @@ export const FiltersModal: React.FC<FiltersModalProps> = ({
   // 모달 열릴 때 초기 백업 저장 및 위치 산출
   useEffect(() => {
     if (isOpen) {
-      initialBackupRef.current = layers.map(l => ({ id: l.id, pixels: [...l.pixels] }));
+      initialBackupRef.current = layers.map(l => ({ id: l.id, pixels: l.pixels }));
+      touchedLayerIdsRef.current = new Set();
       hasInitializedRef.current = true;
       setTone({ brightness: 0, contrast: 0, saturation: 0, hue: 0 });
       setRotationAngle(0);
@@ -107,6 +117,28 @@ export const FiltersModal: React.FC<FiltersModalProps> = ({
     }
   }, [isOpen]);
 
+  /**
+   * 레이어 목록이 바뀌면 백업을 맞춰 둔다.
+   *
+   * 이 패널은 떠 있는 창이라 열어둔 채로 레이어를 추가하거나 그림을 계속
+   * 그릴 수 있다. 열린 순간의 목록만 붙들고 있으면 그 뒤에 만든 레이어는
+   * 백업에 없어 회전·톤 조정이 아무 일도 하지 않고, 그 뒤의 편집은 슬라이더를
+   * 건드리는 순간 옛 픽셀로 되돌아간다.
+   *
+   * pixels는 복사하지 않고 참조를 공유한다. 픽셀 편집은 언제나 새 배열로
+   * 교체되므로(copy-on-write) 안전하고, 획을 그을 때마다 전체 레이어를
+   * 복사하는 비용도 피할 수 있다.
+   */
+  useEffect(() => {
+    if (!isOpen) return;
+    initialBackupRef.current = layers.map(layer => {
+      const existing = initialBackupRef.current.find(b => b.id === layer.id);
+      return existing && touchedLayerIdsRef.current.has(layer.id)
+        ? existing
+        : { id: layer.id, pixels: layer.pixels };
+    });
+  }, [isOpen, layers]);
+
   // 공통 실시간 프리뷰 연산 (톤 + 회전 각도 결합)
   const computeAndPreviewLayers = (
     nextTone = tone,
@@ -118,6 +150,9 @@ export const FiltersModal: React.FC<FiltersModalProps> = ({
     const targetLayerIds = targetScope === 'active' 
       ? [activeLayerId] 
       : layers.filter(l => l.visible).map(l => l.id);
+
+    // 이제부터 이 레이어들의 백업은 슬라이더의 기준점이므로 캔버스를 따라가지 않는다
+    targetLayerIds.forEach(id => touchedLayerIdsRef.current.add(id));
 
     const updatedLayers = initialBackupRef.current.map(layerBackup => {
       if (targetLayerIds.includes(layerBackup.id)) {
@@ -189,6 +224,7 @@ export const FiltersModal: React.FC<FiltersModalProps> = ({
       }));
 
     // 백업 기준점도 함께 갱신하여 톤 슬라이더와의 연계 보장
+    targetLayerIds.forEach(id => touchedLayerIdsRef.current.add(id));
     initialBackupRef.current = initialBackupRef.current.map(backup => {
       const match = updatedLayers.find(u => u.id === backup.id);
       return match ? { id: backup.id, pixels: [...match.pixels] } : backup;
