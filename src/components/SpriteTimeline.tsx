@@ -350,7 +350,7 @@ export const SpriteTimeline: React.FC<SpriteTimelineProps> = ({
 
       {/* 프레임 트랙 (펼쳐진 상태) */}
       {!isCollapsed && (
-        <div className="flex items-center gap-3 p-2.5 pb-20 md:pb-2.5 overflow-x-auto bg-[#0A0A0A]/90 min-h-[76px]">
+        <div className="flex items-center gap-3 p-2.5 overflow-x-auto bg-[#0A0A0A]/90 min-h-[76px]">
           {/* 좌측 실시간 미니 프리뷰 윈도우 */}
           <div className="flex flex-col items-center gap-0.5 border-r border-gray-800 pr-3 flex-shrink-0">
             <span className="text-[9px] font-mono text-gray-500 uppercase">Preview</span>

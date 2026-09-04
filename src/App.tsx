@@ -849,8 +849,10 @@ export default function App() {
     handleUpdateLayerPixels(activeLayerId, emptyPixels, false);
   };
 
+  // 작은 화면에서는 도구 막대가 화면 아래에 떠 있다. 그 높이(막대 50px + 아래 여백 12px)
+  // 만큼 셸 바닥을 비워 두어야 상태바와 프레임 목록이 막대에 가리지 않는다.
   return (
-    <div className="app-shell w-full flex flex-col overflow-hidden dark bg-[#0A0A0A] text-gray-300">
+    <div className="app-shell w-full flex flex-col overflow-hidden pb-[68px] md:pb-0 dark bg-[#0A0A0A] text-gray-300">
       {/* 1. 상단 내비게이션 바 */}
       <Navbar
         canvasWidth={dimensions.width}
