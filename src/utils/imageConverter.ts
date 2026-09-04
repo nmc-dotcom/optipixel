@@ -350,6 +350,79 @@ function cleanupOrphanPixelsPass(pixels: string[], width: number, height: number
   return result;
 }
 
+const clampChannel = (n: number) => Math.max(0, Math.min(255, Math.round(n)));
+
+/**
+ * 색상별로 hex 문자열을 한 번만 만들어 재사용하는 캐시를 돌려준다.
+ *
+ * 변환 결과는 픽셀마다 문자열을 하나씩 들고 있는데, 팔레트가 16색이어도
+ * 매번 새로 만들면 256×256에서 65,536개의 서로 다른 문자열 객체가 생긴다.
+ * 참조를 공유하면 레이어 픽셀 배열은 물론 그 배열을 공유하는 실행취소
+ * 스냅샷이 붙드는 메모리까지 함께 줄어든다.
+ */
+export function createHexInterner(): (r: number, g: number, b: number) => string {
+  const cache = new Map<number, string>();
+  return (r, g, b) => {
+    const key = (clampChannel(r) << 16) | (clampChannel(g) << 8) | clampChannel(b);
+    const cached = cache.get(key);
+    if (cached !== undefined) return cached;
+    const hex = rgbaToHex(r, g, b, 1);
+    cache.set(key, hex);
+    return hex;
+  };
+}
+
+/** 'manual' 배치에서 허용하는 배율 범위 (%) */
+export const MIN_PLACEMENT_SCALE = 10;
+export const MAX_PLACEMENT_SCALE = 400;
+
+/**
+ * 배율을 크게 올려도 중간 버퍼가 폭주하지 않도록 하는 한 변 상한.
+ * (한 변 2048 = Float32Array 4개 × 최대 16M 항목 ≈ 64MB 상한)
+ */
+const MAX_PLACEMENT_DIMENSION = 2048;
+
+/**
+ * 이미지를 타겟 캔버스 안에 놓을 위치와 크기를 계산한다.
+ *
+ * manual이 아니면 원본 종횡비를 유지한 최대 크기('fit' 기준)로 중앙 배치하고,
+ * manual이면 그 'fit' 크기를 100%로 삼아 배율/오프셋을 적용한다.
+ * 변환 엔진과 모달 프리뷰가 동일한 좌표를 쓰도록 양쪽에서 공유한다.
+ */
+export function computeImagePlacement(
+  imgWidth: number,
+  imgHeight: number,
+  targetWidth: number,
+  targetHeight: number,
+  manual?: { scale: number; offsetX: number; offsetY: number }
+): { x: number; y: number; width: number; height: number } {
+  const imgAspect = imgWidth / imgHeight;
+  const targetAspect = targetWidth / targetHeight;
+  const baseWidth = imgAspect > targetAspect
+    ? targetWidth
+    : Math.max(1, Math.round(targetHeight * imgAspect));
+  const baseHeight = imgAspect > targetAspect
+    ? Math.max(1, Math.round(targetWidth / imgAspect))
+    : targetHeight;
+
+  if (!manual) {
+    return {
+      x: Math.floor((targetWidth - baseWidth) / 2),
+      y: Math.floor((targetHeight - baseHeight) / 2),
+      width: baseWidth,
+      height: baseHeight,
+    };
+  }
+
+  const scale = Math.max(MIN_PLACEMENT_SCALE, Math.min(MAX_PLACEMENT_SCALE, manual.scale)) / 100;
+  return {
+    x: Math.round(manual.offsetX),
+    y: Math.round(manual.offsetY),
+    width: Math.max(1, Math.min(MAX_PLACEMENT_DIMENSION, Math.round(baseWidth * scale))),
+    height: Math.max(1, Math.min(MAX_PLACEMENT_DIMENSION, Math.round(baseHeight * scale))),
+  };
+}
+
 /**
  * 이미지를 도트 그래픽(픽셀 배열)으로 변환하는 최고 성능 하이브리드 엔진
  */
@@ -362,6 +435,9 @@ export function convertImageToPixels(
     targetWidth,
     targetHeight,
     fitMode,
+    placementScale = 100,
+    placementX = 0,
+    placementY = 0,
     dither,
     colorCount,
     useCurrentPalette,
@@ -405,17 +481,21 @@ export function convertImageToPixels(
   let rawB: Float32Array;
   let rawA: Float32Array;
 
-  if (fitMode === 'fit') {
-    // 원본 종횡비를 유지한 내부 크기로 다운스케일 후, 목표 캔버스 중앙에
-    // 배치하고 나머지는 투명 여백(레터박스/필러박스)으로 채운다.
-    const imgAspect = sWidth / sHeight;
-    const targetAspect = targetWidth / targetHeight;
-    const innerWidth = imgAspect > targetAspect
-      ? targetWidth
-      : Math.max(1, Math.round(targetHeight * imgAspect));
-    const innerHeight = imgAspect > targetAspect
-      ? Math.max(1, Math.round(targetWidth / imgAspect))
-      : targetHeight;
+  if (fitMode === 'fit' || fitMode === 'manual') {
+    // 원본 종횡비를 유지한 내부 크기로 다운스케일한 뒤 목표 캔버스에 배치하고,
+    // 나머지는 투명 여백(레터박스/필러박스)으로 남긴다.
+    // 'manual'은 그 배치 좌표/크기를 사용자가 직접 지정한 것이며, 캔버스 밖으로
+    // 벗어난 부분은 아래 루프에서 잘라낸다.
+    const placement = computeImagePlacement(
+      sWidth,
+      sHeight,
+      targetWidth,
+      targetHeight,
+      fitMode === 'manual'
+        ? { scale: placementScale, offsetX: placementX, offsetY: placementY }
+        : undefined
+    );
+    const { width: innerWidth, height: innerHeight } = placement;
 
     const inner = runDownsample({ sx, sy, sWidth, sHeight }, innerWidth, innerHeight);
 
@@ -424,12 +504,16 @@ export function convertImageToPixels(
     rawB = new Float32Array(targetWidth * targetHeight);
     rawA = new Float32Array(targetWidth * targetHeight); // 기본값 0 = 투명 여백
 
-    const padX = Math.floor((targetWidth - innerWidth) / 2);
-    const padY = Math.floor((targetHeight - innerHeight) / 2);
-    for (let y = 0; y < innerHeight; y++) {
-      for (let x = 0; x < innerWidth; x++) {
+    // 캔버스 경계 밖 영역을 잘라낸 실제 복사 범위 (inner 로컬 좌표)
+    const copyX0 = Math.max(0, -placement.x);
+    const copyY0 = Math.max(0, -placement.y);
+    const copyX1 = Math.min(innerWidth, targetWidth - placement.x);
+    const copyY1 = Math.min(innerHeight, targetHeight - placement.y);
+
+    for (let y = copyY0; y < copyY1; y++) {
+      for (let x = copyX0; x < copyX1; x++) {
         const srcIdx = y * innerWidth + x;
-        const dstIdx = (y + padY) * targetWidth + (x + padX);
+        const dstIdx = (y + placement.y) * targetWidth + (x + placement.x);
         rawR[dstIdx] = inner.r[srcIdx];
         rawG[dstIdx] = inner.g[srcIdx];
         rawB[dstIdx] = inner.b[srcIdx];
@@ -473,6 +557,7 @@ export function convertImageToPixels(
   }
 
   let resultPixels: string[] = new Array(targetWidth * targetHeight).fill('');
+  const toHex = createHexInterner();
 
   // 알파 이진화 임계값: 타일 커버리지가 이 값 미만이면 완전 투명, 이상이면
   // 완전 불투명으로 처리한다 (부드럽게 섞인 반투명 가장자리를 방지).
@@ -493,7 +578,7 @@ export function convertImageToPixels(
         };
 
         const closest = findClosestColor(current, activePalette);
-        resultPixels[idx] = rgbaToHex(closest.r, closest.g, closest.b, 1);
+        resultPixels[idx] = toHex(closest.r, closest.g, closest.b);
 
         const errR = current.r - closest.r;
         const errG = current.g - closest.g;
@@ -536,7 +621,7 @@ export function convertImageToPixels(
         };
 
         const closest = findClosestColor(current, activePalette);
-        resultPixels[idx] = rgbaToHex(closest.r, closest.g, closest.b, 1);
+        resultPixels[idx] = toHex(closest.r, closest.g, closest.b);
 
         const errR = current.r - closest.r;
         const errG = current.g - closest.g;
@@ -576,7 +661,7 @@ export function convertImageToPixels(
         };
 
         const closest = findClosestColor(current, activePalette);
-        resultPixels[idx] = rgbaToHex(closest.r, closest.g, closest.b, 1);
+        resultPixels[idx] = toHex(closest.r, closest.g, closest.b);
       }
     }
   }
@@ -596,9 +681,9 @@ export function convertImageToPixels(
 
         if (activePalette.length > 0) {
           const closest = findClosestColor(current, activePalette);
-          resultPixels[idx] = rgbaToHex(closest.r, closest.g, closest.b, 1);
+          resultPixels[idx] = toHex(closest.r, closest.g, closest.b);
         } else {
-          resultPixels[idx] = rgbaToHex(current.r, current.g, current.b, 1);
+          resultPixels[idx] = toHex(current.r, current.g, current.b);
         }
       }
     }

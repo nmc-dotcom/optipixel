@@ -66,10 +66,18 @@ export type DitherType = 'none' | 'floyd-steinberg' | 'bayer4x4' | 'atkinson';
 
 export type DownscaleMethod = 'edge-preserving' | 'dominant';
 
+/** 이미지를 타겟 캔버스에 맞추는 방식. 'manual'은 사용자가 위치/크기를 직접 지정한다 */
+export type ImageFitMode = 'fit' | 'stretch' | 'crop' | 'manual';
+
 export interface ImageConversionSettings {
   targetWidth: number;
   targetHeight: number;
-  fitMode: 'fit' | 'stretch' | 'crop';
+  fitMode: ImageFitMode;
+  /** fitMode가 'manual'일 때 배치 배율 (%). 100 = 'fit' 기준 크기 */
+  placementScale: number;
+  /** fitMode가 'manual'일 때 이미지 좌상단의 캔버스 픽셀 좌표 (음수 = 캔버스 밖으로 밀림) */
+  placementX: number;
+  placementY: number;
   colorCount: number; // e.g. 4, 8, 16, 32, 64, 256 (0 = unlimited)
   useCurrentPalette: boolean;
   dither: DitherType;

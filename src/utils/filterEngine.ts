@@ -1,11 +1,33 @@
 import { hexToRgba, RGBA, rgbaToHex } from './pixelEngine';
 
 /**
+ * 색상 단위 필터를 픽셀 배열에 적용한다.
+ *
+ * 같은 입력 색은 언제나 같은 결과를 내므로 색상별로 한 번만 계산하고 그 문자열
+ * 참조를 재사용한다. 팔레트가 좁은 도트 이미지에서는 변환 횟수가 픽셀 수가 아닌
+ * 색상 수에 비례하게 되고(256×256 · 16색이면 65,536회 → 16회), 결과 배열도
+ * 문자열 참조를 공유해 그만큼 가벼워진다. 필터 모달의 슬라이더 실시간
+ * 미리보기가 이 경로를 프레임마다 태우기 때문에 체감 차이가 크다.
+ *
+ * 투명 픽셀('')은 변환하지 않고 그대로 둔다.
+ */
+function mapPixelColors(pixels: string[], transform: (hex: string) => string): string[] {
+  const cache = new Map<string, string>();
+  return pixels.map(pixel => {
+    if (!pixel) return '';
+    const cached = cache.get(pixel);
+    if (cached !== undefined) return cached;
+    const next = transform(pixel);
+    cache.set(pixel, next);
+    return next;
+  });
+}
+
+/**
  * 레이어 픽셀에 색상 반전 적용
  */
 export function filterInvert(pixels: string[]): string[] {
-  return pixels.map(hex => {
-    if (!hex) return '';
+  return mapPixelColors(pixels, hex => {
     const { r, g, b, a } = hexToRgba(hex);
     return rgbaToHex(255 - r, 255 - g, 255 - b, a);
   });
@@ -15,8 +37,7 @@ export function filterInvert(pixels: string[]): string[] {
  * 레이어 픽셀에 흑백(Grayscale) 적용
  */
 export function filterGrayscale(pixels: string[]): string[] {
-  return pixels.map(hex => {
-    if (!hex) return '';
+  return mapPixelColors(pixels, hex => {
     const { r, g, b, a } = hexToRgba(hex);
     const gray = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
     return rgbaToHex(gray, gray, gray, a);
@@ -27,8 +48,7 @@ export function filterGrayscale(pixels: string[]): string[] {
  * 밝기 조정
  */
 export function filterBrightness(pixels: string[], delta: number): string[] {
-  return pixels.map(hex => {
-    if (!hex) return '';
+  return mapPixelColors(pixels, hex => {
     const { r, g, b, a } = hexToRgba(hex);
     return rgbaToHex(
       Math.max(0, Math.min(255, r + delta)),
@@ -44,8 +64,7 @@ export function filterBrightness(pixels: string[], delta: number): string[] {
  */
 export function filterContrast(pixels: string[], contrast: number): string[] {
   const factor = (259 * (contrast + 255)) / (255 * (259 - contrast));
-  return pixels.map(hex => {
-    if (!hex) return '';
+  return mapPixelColors(pixels, hex => {
     const { r, g, b, a } = hexToRgba(hex);
     const nr = Math.max(0, Math.min(255, Math.round(factor * (r - 128) + 128)));
     const ng = Math.max(0, Math.min(255, Math.round(factor * (g - 128) + 128)));
@@ -59,8 +78,7 @@ export function filterContrast(pixels: string[], contrast: number): string[] {
  */
 export function filterSaturation(pixels: string[], saturation: number): string[] {
   const satFactor = 1 + saturation / 100;
-  return pixels.map(hex => {
-    if (!hex) return '';
+  return mapPixelColors(pixels, hex => {
     const { r, g, b, a } = hexToRgba(hex);
     const gray = 0.299 * r + 0.587 * g + 0.114 * b;
     const nr = Math.max(0, Math.min(255, Math.round(gray + (r - gray) * satFactor)));
@@ -91,8 +109,7 @@ export function applyComprehensiveTone(
   const satFactor = 1 + saturation / 100;
   const hueShiftDegree = hue;
 
-  return pixels.map(hex => {
-    if (!hex) return '';
+  return mapPixelColors(pixels, hex => {
     let { r, g, b, a } = hexToRgba(hex);
 
     // 1. Brightness
@@ -176,8 +193,7 @@ export function applyComprehensiveTone(
  * 색조(Hue) 회전
  */
 export function filterHueShift(pixels: string[], degree: number): string[] {
-  return pixels.map(hex => {
-    if (!hex) return '';
+  return mapPixelColors(pixels, hex => {
     const { r, g, b, a } = hexToRgba(hex);
     // RGB to HSL
     const rf = r / 255;

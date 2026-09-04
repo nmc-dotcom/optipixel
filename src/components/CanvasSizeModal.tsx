@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { RESOLUTION_PRESETS } from '../constants/presets';
+import { MAX_CANVAS_SIZE, MIN_CANVAS_SIZE, RESOLUTION_PRESETS } from '../constants/presets';
 import { Maximize2, X, Check, ArrowRight } from 'lucide-react';
 
 interface CanvasSizeModalProps {
@@ -30,7 +30,7 @@ export const CanvasSizeModal: React.FC<CanvasSizeModalProps> = ({
   };
 
   const handleWidthChange = (val: number) => {
-    const clamped = Math.max(4, Math.min(128, val));
+    const clamped = Math.max(MIN_CANVAS_SIZE, Math.min(MAX_CANVAS_SIZE, val));
     setSelectedWidth(clamped);
     if (lockAspect) {
       setSelectedHeight(clamped);
@@ -38,7 +38,7 @@ export const CanvasSizeModal: React.FC<CanvasSizeModalProps> = ({
   };
 
   const handleHeightChange = (val: number) => {
-    const clamped = Math.max(4, Math.min(128, val));
+    const clamped = Math.max(MIN_CANVAS_SIZE, Math.min(MAX_CANVAS_SIZE, val));
     setSelectedHeight(clamped);
     if (lockAspect) {
       setSelectedWidth(clamped);
@@ -104,7 +104,7 @@ export const CanvasSizeModal: React.FC<CanvasSizeModalProps> = ({
           {/* 2. 사용자 정의 커스텀 사이즈 */}
           <div className="bg-[#161616] p-3.5 rounded-lg border border-gray-800 flex flex-col gap-3">
             <div className="flex items-center justify-between text-xs font-semibold text-gray-300">
-              <span className="text-[11px] font-mono uppercase text-gray-400">Custom Size (4~128px)</span>
+              <span className="text-[11px] font-mono uppercase text-gray-400">Custom Size ({MIN_CANVAS_SIZE}~{MAX_CANVAS_SIZE}px)</span>
               <label className="flex items-center gap-1.5 text-[11px] text-gray-400 cursor-pointer">
                 <input
                   type="checkbox"
@@ -122,8 +122,8 @@ export const CanvasSizeModal: React.FC<CanvasSizeModalProps> = ({
                 <div className="flex items-center gap-2 bg-[#0A0A0A] border border-gray-800 rounded px-2.5 py-1.5">
                   <input
                     type="number"
-                    min={4}
-                    max={128}
+                    min={MIN_CANVAS_SIZE}
+                    max={MAX_CANVAS_SIZE}
                     value={selectedWidth}
                     onChange={(e) => handleWidthChange(Number(e.target.value))}
                     className="w-full bg-transparent font-mono text-sm text-white focus:outline-none"
@@ -137,8 +137,8 @@ export const CanvasSizeModal: React.FC<CanvasSizeModalProps> = ({
                 <div className="flex items-center gap-2 bg-[#0A0A0A] border border-gray-800 rounded px-2.5 py-1.5">
                   <input
                     type="number"
-                    min={4}
-                    max={128}
+                    min={MIN_CANVAS_SIZE}
+                    max={MAX_CANVAS_SIZE}
                     value={selectedHeight}
                     onChange={(e) => handleHeightChange(Number(e.target.value))}
                     className="w-full bg-transparent font-mono text-sm text-white focus:outline-none"

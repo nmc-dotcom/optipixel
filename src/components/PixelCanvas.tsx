@@ -359,19 +359,21 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
     }
   };
 
-  // 브러시 / 지우개 픽셀 적용 헬퍼
-  const applyBrushPixels = (
-    currentPixels: string[],
-    x: number,
-    y: number,
-    color: string
-  ): string[] => {
-    const updated = [...currentPixels];
+  /**
+   * 브러시 / 지우개 스탬프를 `target` 배열에 그 자리에서 찍는다.
+   *
+   * 여러 점을 찍을 때 점마다 배열을 복사하면 비용이 O(점 수 × 픽셀 수)로 커진다
+   * (256×256 캔버스에 큰 원을 그리면 포인터 이동 한 번에 수천만 번의 복사).
+   * 그래서 복사는 호출자가 스트로크당 한 번만 하고, 여기서는 복사본을 직접 고친다.
+   * **레이어의 원본 pixels 배열을 그대로 넘기면 안 된다** — 실행취소 스냅샷이
+   * 그 배열을 공유하고 있어 과거 단계까지 함께 변형된다.
+   */
+  const stampBrushPixels = (target: string[], x: number, y: number, color: string) => {
     const stamp = getBrushStamp(x, y, brushSize);
 
     const setSingle = (px: number, py: number) => {
       if (px >= 0 && px < width && py >= 0 && py < height) {
-        updated[py * width + px] = color;
+        target[py * width + px] = color;
       }
     };
 
@@ -381,9 +383,26 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
         setSingle(width - 1 - pt.x, pt.y);
       }
     });
+  };
 
+  /** 여러 점에 스탬프를 찍은 새 배열을 돌려준다 (복사는 한 번뿐) */
+  const stampPointsToNewPixels = (
+    currentPixels: string[],
+    points: { x: number; y: number }[],
+    color: string
+  ): string[] => {
+    const updated = [...currentPixels];
+    points.forEach(pt => stampBrushPixels(updated, pt.x, pt.y, color));
     return updated;
   };
+
+  // 브러시 / 지우개 픽셀 적용 헬퍼
+  const applyBrushPixels = (
+    currentPixels: string[],
+    x: number,
+    y: number,
+    color: string
+  ): string[] => stampPointsToNewPixels(currentPixels, [{ x, y }], color);
 
   // 선분 보간 그리기 (Bresenham)
   const applyLineStroke = (
@@ -393,14 +412,8 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
     toX: number,
     toY: number,
     color: string
-  ): string[] => {
-    const pts = getLinePoints(fromX, fromY, toX, toY);
-    let updated = [...currentPixels];
-    pts.forEach(pt => {
-      updated = applyBrushPixels(updated, pt.x, pt.y, color);
-    });
-    return updated;
-  };
+  ): string[] =>
+    stampPointsToNewPixels(currentPixels, getLinePoints(fromX, fromY, toX, toY), color);
 
   // 포인터 다운
   const handlePointerDown = (e: React.PointerEvent) => {
@@ -525,31 +538,19 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
     } else if (currentTool === 'line') {
       if (startPointRef.current) {
         const pts = getLinePoints(startPointRef.current.x, startPointRef.current.y, pt.x, pt.y);
-        let preview = [...activeLayer.pixels];
-        pts.forEach(p => {
-          preview = applyBrushPixels(preview, p.x, p.y, paintColor);
-        });
-        previewPixelsRef.current = preview;
+        previewPixelsRef.current = stampPointsToNewPixels(activeLayer.pixels, pts, paintColor);
         render();
       }
     } else if (currentTool === 'rect') {
       if (startPointRef.current) {
         const pts = getRectanglePoints(startPointRef.current.x, startPointRef.current.y, pt.x, pt.y, fillShape);
-        let preview = [...activeLayer.pixels];
-        pts.forEach(p => {
-          preview = applyBrushPixels(preview, p.x, p.y, paintColor);
-        });
-        previewPixelsRef.current = preview;
+        previewPixelsRef.current = stampPointsToNewPixels(activeLayer.pixels, pts, paintColor);
         render();
       }
     } else if (currentTool === 'circle') {
       if (startPointRef.current) {
         const pts = getCirclePoints(startPointRef.current.x, startPointRef.current.y, pt.x, pt.y, fillShape);
-        let preview = [...activeLayer.pixels];
-        pts.forEach(p => {
-          preview = applyBrushPixels(preview, p.x, p.y, paintColor);
-        });
-        previewPixelsRef.current = preview;
+        previewPixelsRef.current = stampPointsToNewPixels(activeLayer.pixels, pts, paintColor);
         render();
       }
     }

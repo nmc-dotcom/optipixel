@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { filterGenerateOutline } from './filterEngine';
+import { filterBrightness, filterGenerateOutline, filterInvert } from './filterEngine';
 
 const OUTLINE = '#ff0000';
 const BODY = '#ffffff';
@@ -76,5 +76,34 @@ describe('filterGenerateOutline', () => {
 
     // 3x3 링(8칸)만 칠해져야 하고, 그 바깥 5x5 링까지 번지면 안 된다
     expect(out.filter(c => c === OUTLINE)).toHaveLength(8);
+  });
+});
+
+describe('색상 단위 메모이제이션', () => {
+  it('같은 색 픽셀들은 결과 문자열 객체를 공유한다', () => {
+    const result = filterInvert(['#ff8000', '#ff8000', '#000000']);
+    // 참조 공유가 깨지면 256×256 레이어가 픽셀 수만큼 문자열을 새로 들고 있게 된다
+    expect(result[1]).toBe(result[0]);
+    expect(result[2]).not.toBe(result[0]);
+  });
+
+  it('색상마다 한 번만 변환한다', () => {
+    const pixels = Array.from({ length: 500 }, (_, i) => (i % 2 ? '#112233' : '#445566'));
+    const result = filterBrightness(pixels, 20);
+    const distinct = new Set(result);
+    expect(distinct.size).toBe(2);
+    // 같은 색 자리끼리는 모두 같은 객체
+    expect(result[0]).toBe(result[2]);
+    expect(result[1]).toBe(result[3]);
+  });
+
+  it('투명 픽셀은 변환하지 않고 그대로 둔다', () => {
+    expect(filterInvert(['', '#ffffff', ''])).toEqual(['', '#000000', '']);
+  });
+
+  it('입력 배열을 변형하지 않는다', () => {
+    const pixels = ['#ffffff', '#000000'];
+    filterInvert(pixels);
+    expect(pixels).toEqual(['#ffffff', '#000000']);
   });
 });

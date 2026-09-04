@@ -1,8 +1,16 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { DitherType, DownscaleMethod, ImageConversionSettings } from '../types';
-import { RESOLUTION_PRESETS } from '../constants/presets';
-import { convertImageToPixels, detectPixelScale, DetectedPixelScale, loadImageFromFile } from '../utils/imageConverter';
-import { Upload, X, Sliders, Sparkles, RefreshCw, Check, Wand2 } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { DitherType, DownscaleMethod, ImageConversionSettings, ImageFitMode } from '../types';
+import { MAX_CANVAS_SIZE, RESOLUTION_PRESETS } from '../constants/presets';
+import {
+  computeImagePlacement,
+  convertImageToPixels,
+  detectPixelScale,
+  DetectedPixelScale,
+  loadImageFromFile,
+  MAX_PLACEMENT_SCALE,
+  MIN_PLACEMENT_SCALE,
+} from '../utils/imageConverter';
+import { Upload, X, Sliders, Sparkles, RefreshCw, Check, Wand2, Move, Crosshair, Maximize, Scan } from 'lucide-react';
 
 interface ImageToPixelModalProps {
   isOpen: boolean;
@@ -29,6 +37,9 @@ export const ImageToPixelModal: React.FC<ImageToPixelModalProps> = ({
     targetWidth: currentWidth,
     targetHeight: currentHeight,
     fitMode: 'fit',
+    placementScale: 100,
+    placementX: 0,
+    placementY: 0,
     colorCount: 16,
     useCurrentPalette: false,
     dither: 'atkinson',
@@ -44,8 +55,13 @@ export const ImageToPixelModal: React.FC<ImageToPixelModalProps> = ({
   // 업스케일된 픽셀 아트에서 감지된 원본 픽셀 크기 제안 (없으면 null)
   const [detectedScale, setDetectedScale] = useState<DetectedPixelScale | null>(null);
 
+  // 배치(위치/크기)를 조작하는 중에는 무거운 변환 대신 원본을 즉시 그려 실시간 피드백을 준다
+  const [isAdjustingPlacement, setIsAdjustingPlacement] = useState(false);
+
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // 프리뷰 캔버스 드래그 상태 (포인터 시작점과 그 시점의 배치 좌표)
+  const dragRef = useRef<{ startX: number; startY: number; originX: number; originY: number; pxPerPixel: number } | null>(null);
 
   // 현재 캔버스 크기로 리셋
   useEffect(() => {
@@ -57,6 +73,139 @@ export const ImageToPixelModal: React.FC<ImageToPixelModalProps> = ({
       }));
     }
   }, [isOpen, currentWidth, currentHeight]);
+
+  const isManual = settings.fitMode === 'manual';
+
+  // 현재 설정으로 이미지가 캔버스 위에 놓이는 사각형 (변환 엔진과 동일한 계산)
+  const placement = loadedImage
+    ? computeImagePlacement(
+        loadedImage.width,
+        loadedImage.height,
+        settings.targetWidth,
+        settings.targetHeight,
+        isManual
+          ? { scale: settings.placementScale, offsetX: settings.placementX, offsetY: settings.placementY }
+          : undefined
+      )
+    : null;
+
+  /** 주어진 배율로 이미지를 캔버스 중앙에 놓는 배치 값 */
+  const centeredPlacement = useCallback(
+    (img: HTMLImageElement, targetW: number, targetH: number, scale: number) => {
+      const sized = computeImagePlacement(img.width, img.height, targetW, targetH, {
+        scale,
+        offsetX: 0,
+        offsetY: 0,
+      });
+      return {
+        placementScale: scale,
+        placementX: Math.floor((targetW - sized.width) / 2),
+        placementY: Math.floor((targetH - sized.height) / 2),
+      };
+    },
+    []
+  );
+
+  /** 'fit'(100%) 대비 배율: 캔버스를 꽉 채우는 값과 원본 1픽셀=1도트가 되는 값 */
+  const scalePresets = (() => {
+    if (!loadedImage) return null;
+    const base = computeImagePlacement(loadedImage.width, loadedImage.height, settings.targetWidth, settings.targetHeight);
+    return {
+      cover: Math.round(Math.max(settings.targetWidth / base.width, settings.targetHeight / base.height) * 100),
+      native: Math.round((loadedImage.width / base.width) * 100),
+    };
+  })();
+
+  /** 배치 값을 갱신하면서 실시간 프리뷰를 켠다 */
+  const updatePlacement = useCallback((patch: Partial<ImageConversionSettings>) => {
+    setIsAdjustingPlacement(true);
+    setSettings(s => ({ ...s, ...patch }));
+  }, []);
+
+  /** 타겟 해상도 변경 — 수동 배치 중이면 새 캔버스 기준으로 중앙 재배치 */
+  const applyTargetSize = (width: number, height: number) => {
+    setSettings(s => ({
+      ...s,
+      targetWidth: width,
+      targetHeight: height,
+      ...(s.fitMode === 'manual' && loadedImage
+        ? centeredPlacement(loadedImage, width, height, s.placementScale)
+        : {}),
+    }));
+  };
+
+  const handleFitModeChange = (mode: ImageFitMode) => {
+    if (mode === 'manual' && loadedImage) {
+      // 'fit' 상태(원본 비율 유지, 중앙)에서 시작해 사용자가 조정하도록 한다
+      const centered = centeredPlacement(loadedImage, settings.targetWidth, settings.targetHeight, 100);
+      setSettings(s => ({ ...s, fitMode: mode, ...centered }));
+      return;
+    }
+    setSettings(s => ({ ...s, fitMode: mode }));
+  };
+
+  // 프리뷰 캔버스 드래그로 이미지 위치 이동
+  const handlePlacementPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!isManual || !loadedImage) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const pxPerPixel = rect.width / settings.targetWidth;
+    if (pxPerPixel <= 0) return;
+    dragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      originX: settings.placementX,
+      originY: settings.placementY,
+      pxPerPixel,
+    };
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setIsAdjustingPlacement(true);
+  };
+
+  const handlePlacementPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    updatePlacement({
+      placementX: Math.round(drag.originX + (e.clientX - drag.startX) / drag.pxPerPixel),
+      placementY: Math.round(drag.originY + (e.clientY - drag.startY) / drag.pxPerPixel),
+    });
+  };
+
+  const handlePlacementPointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!dragRef.current) return;
+    dragRef.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+  };
+
+  // 배치 조작 중 즉시 반영되는 가벼운 프리뷰 (디더링 없이 원본을 니어리스트로 그림).
+  // 180ms 뒤 아래 변환 파이프라인의 결과가 이 그림을 덮어쓴다.
+  useEffect(() => {
+    if (!loadedImage || !isAdjustingPlacement || !isManual) return;
+    const canvas = previewCanvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (!canvas || !ctx) return;
+
+    canvas.width = settings.targetWidth;
+    canvas.height = settings.targetHeight;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.imageSmoothingEnabled = false;
+    const pl = computeImagePlacement(loadedImage.width, loadedImage.height, settings.targetWidth, settings.targetHeight, {
+      scale: settings.placementScale,
+      offsetX: settings.placementX,
+      offsetY: settings.placementY,
+    });
+    ctx.drawImage(loadedImage, pl.x, pl.y, pl.width, pl.height);
+  }, [
+    loadedImage,
+    isAdjustingPlacement,
+    isManual,
+    settings.targetWidth,
+    settings.targetHeight,
+    settings.placementScale,
+    settings.placementX,
+    settings.placementY,
+  ]);
 
   // 원본 이미지 픽셀 수 상한 (초과 시 대용량 메모리 할당/브라우저 멈춤 방지를 위해 거부)
   const MAX_SOURCE_PIXELS = 4096 * 4096;
@@ -78,7 +227,15 @@ export const ImageToPixelModal: React.FC<ImageToPixelModalProps> = ({
       }
 
       setLoadedImage(img);
-      setDetectedScale(detectPixelScale(img));
+      // 새 이미지는 이전 이미지의 배치 좌표를 그대로 쓰면 엉뚱한 곳에 놓이므로 중앙으로 되돌린다
+      setSettings(s => ({ ...s, ...centeredPlacement(img, s.targetWidth, s.targetHeight, 100) }));
+      const detected = detectPixelScale(img);
+      // 되돌린 원본 크기가 캔버스 상한을 넘으면 그대로 적용할 수 없으므로 제안하지 않는다
+      setDetectedScale(
+        detected && detected.suggestedWidth <= MAX_CANVAS_SIZE && detected.suggestedHeight <= MAX_CANVAS_SIZE
+          ? detected
+          : null
+      );
     } catch (err) {
       alert('이미지를 불러오는데 실패했습니다. 지원되는 이미지 파일(PNG, JPG, GIF 등)인지 확인해주세요.');
       setSelectedFile(null);
@@ -95,6 +252,7 @@ export const ImageToPixelModal: React.FC<ImageToPixelModalProps> = ({
       fitMode: 'stretch',
       downscaleMethod: 'dominant',
     }));
+    setIsAdjustingPlacement(false);
     setDetectedScale(null);
   };
 
@@ -131,6 +289,7 @@ export const ImageToPixelModal: React.FC<ImageToPixelModalProps> = ({
         }
       }
       ctx.putImageData(imgData, 0, 0);
+      setIsAdjustingPlacement(false);
     }, 180);
 
     return () => window.clearTimeout(timeoutId);
@@ -233,16 +392,25 @@ export const ImageToPixelModal: React.FC<ImageToPixelModalProps> = ({
                 <div className="flex-1 min-h-[260px] flex items-center justify-center bg-checkered rounded-lg border border-gray-800 p-4 overflow-hidden">
                   <canvas
                     ref={previewCanvasRef}
+                    onPointerDown={handlePlacementPointerDown}
+                    onPointerMove={handlePlacementPointerMove}
+                    onPointerUp={handlePlacementPointerUp}
+                    onPointerCancel={handlePlacementPointerUp}
                     style={{
                       width: Math.min(280, settings.targetWidth * 8),
                       height: Math.min(280, settings.targetHeight * 8),
+                      touchAction: isManual ? 'none' : undefined,
                     }}
-                    className="pixelated shadow-2xl border border-gray-700 rounded-sm max-w-full max-h-[280px]"
+                    className={`pixelated shadow-2xl border rounded-sm max-w-full max-h-[280px] ${
+                      isManual ? 'border-emerald-500/60 cursor-grab active:cursor-grabbing' : 'border-gray-700'
+                    }`}
                   />
                 </div>
 
                 <div className="text-[11px] text-gray-500 text-center">
-                  * 픽셀 확대 렌더링으로 최종 스프라이트의 디테일을 보여줍니다.
+                  {isManual
+                    ? '* 프리뷰를 드래그해 이미지를 옮기고, 아래 배율로 크기를 맞추세요.'
+                    : '* 픽셀 확대 렌더링으로 최종 스프라이트의 디테일을 보여줍니다.'}
                 </div>
               </div>
             )}
@@ -267,7 +435,7 @@ export const ImageToPixelModal: React.FC<ImageToPixelModalProps> = ({
                 {RESOLUTION_PRESETS.map(preset => (
                   <button
                     key={preset.label}
-                    onClick={() => setSettings(s => ({ ...s, targetWidth: preset.width, targetHeight: preset.height }))}
+                    onClick={() => applyTargetSize(preset.width, preset.height)}
                     className={`px-2 py-1.5 rounded text-xs font-mono border transition-all ${
                       settings.targetWidth === preset.width && settings.targetHeight === preset.height
                         ? 'bg-emerald-600 text-white border-emerald-500 font-bold shadow-sm'
@@ -279,7 +447,7 @@ export const ImageToPixelModal: React.FC<ImageToPixelModalProps> = ({
                 ))}
                 {/* 현재 캔버스 크기 버튼 */}
                 <button
-                  onClick={() => setSettings(s => ({ ...s, targetWidth: currentWidth, targetHeight: currentHeight }))}
+                  onClick={() => applyTargetSize(currentWidth, currentHeight)}
                   className={`px-1.5 py-1.5 rounded text-[11px] font-mono border transition-all truncate ${
                     settings.targetWidth === currentWidth && settings.targetHeight === currentHeight && !RESOLUTION_PRESETS.some(p => p.width === currentWidth && p.height === currentHeight && settings.targetWidth === p.width)
                       ? 'bg-emerald-600 text-white border-emerald-500 font-bold shadow-sm'
@@ -295,22 +463,137 @@ export const ImageToPixelModal: React.FC<ImageToPixelModalProps> = ({
             {/* 2. 비율 맞춤 모드 (Fit Mode) */}
             <div className="flex flex-col gap-1.5">
               <label className="text-[10px] font-mono uppercase text-gray-400">Aspect Ratio Fit</label>
-              <div className="grid grid-cols-3 gap-1.5 text-xs">
-                {(['fit', 'crop', 'stretch'] as const).map(mode => (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-xs">
+                {(['fit', 'crop', 'stretch', 'manual'] as const).map(mode => (
                   <button
                     key={mode}
-                    onClick={() => setSettings(s => ({ ...s, fitMode: mode }))}
-                    className={`py-1.5 rounded capitalize border transition-colors ${
+                    onClick={() => handleFitModeChange(mode)}
+                    disabled={mode === 'manual' && !loadedImage}
+                    title={
+                      mode === 'manual'
+                        ? '이미지를 캔버스 위에서 직접 옮기고 크기를 조절합니다'
+                        : undefined
+                    }
+                    className={`py-1.5 rounded border transition-colors ${
                       settings.fitMode === mode
                         ? 'bg-emerald-600 text-white border-emerald-500 font-semibold'
-                        : 'bg-[#161616] border-gray-800 text-gray-300 hover:bg-gray-800'
+                        : mode === 'manual' && !loadedImage
+                          ? 'bg-[#161616] border-gray-800 text-gray-600 cursor-not-allowed'
+                          : 'bg-[#161616] border-gray-800 text-gray-300 hover:bg-gray-800'
                     }`}
                   >
-                    {mode === 'fit' ? '비율 유지 (Fit)' : mode === 'crop' ? '화면 채움 (Crop)' : '늘이기 (Stretch)'}
+                    {mode === 'fit'
+                      ? '비율 유지 (Fit)'
+                      : mode === 'crop'
+                        ? '화면 채움 (Crop)'
+                        : mode === 'stretch'
+                          ? '늘이기 (Stretch)'
+                          : '직접 배치'}
                   </button>
                 ))}
               </div>
             </div>
+
+            {/* 2-B. 직접 배치: 캔버스 위 위치와 크기를 사용자가 지정 */}
+            {isManual && loadedImage && placement && scalePresets && (
+              <div className="flex flex-col gap-2.5 p-3 bg-[#161616] rounded-lg border border-emerald-800/50">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-mono uppercase text-emerald-400 flex items-center gap-1.5">
+                    <Move className="w-3 h-3" />
+                    Placement (위치 · 크기)
+                  </span>
+                  <span className="text-[10px] font-mono text-gray-500">
+                    {placement.width} × {placement.height} px @ ({placement.x}, {placement.y})
+                  </span>
+                </div>
+
+                {/* 배율 */}
+                <div>
+                  <div className="flex justify-between text-[10px] font-mono uppercase text-gray-400 mb-1">
+                    <span>Scale (배율)</span>
+                    <span className="font-mono text-emerald-400">{settings.placementScale}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={MIN_PLACEMENT_SCALE}
+                    max={MAX_PLACEMENT_SCALE}
+                    value={settings.placementScale}
+                    onChange={(e) => {
+                      const scale = Number(e.target.value);
+                      // 배율은 이미지 중심을 고정한 채 커지고 작아지는 편이 자연스럽다
+                      const next = computeImagePlacement(
+                        loadedImage.width,
+                        loadedImage.height,
+                        settings.targetWidth,
+                        settings.targetHeight,
+                        { scale, offsetX: 0, offsetY: 0 }
+                      );
+                      updatePlacement({
+                        placementScale: scale,
+                        placementX: Math.round(placement.x + (placement.width - next.width) / 2),
+                        placementY: Math.round(placement.y + (placement.height - next.height) / 2),
+                      });
+                    }}
+                    className="w-full accent-emerald-500 h-1.5 bg-gray-800 rounded cursor-pointer"
+                  />
+                </div>
+
+                {/* 빠른 맞춤 버튼 */}
+                <div className="grid grid-cols-3 gap-1.5 text-[11px]">
+                  <button
+                    onClick={() => updatePlacement(centeredPlacement(loadedImage, settings.targetWidth, settings.targetHeight, 100))}
+                    className="py-1.5 rounded border border-gray-800 bg-[#0A0A0A] text-gray-300 hover:bg-gray-800 flex items-center justify-center gap-1"
+                    title="원본 비율을 유지한 채 캔버스 안에 모두 들어가도록 맞춥니다"
+                  >
+                    <Crosshair className="w-3 h-3" />
+                    <span>전체 보기</span>
+                  </button>
+                  <button
+                    onClick={() => updatePlacement(centeredPlacement(loadedImage, settings.targetWidth, settings.targetHeight, Math.min(MAX_PLACEMENT_SCALE, scalePresets.cover)))}
+                    className="py-1.5 rounded border border-gray-800 bg-[#0A0A0A] text-gray-300 hover:bg-gray-800 flex items-center justify-center gap-1"
+                    title="여백 없이 캔버스를 꽉 채웁니다 (넘치는 부분은 잘림)"
+                  >
+                    <Maximize className="w-3 h-3" />
+                    <span>꽉 채우기</span>
+                  </button>
+                  <button
+                    onClick={() => updatePlacement(centeredPlacement(loadedImage, settings.targetWidth, settings.targetHeight, Math.max(MIN_PLACEMENT_SCALE, Math.min(MAX_PLACEMENT_SCALE, scalePresets.native))))}
+                    className="py-1.5 rounded border border-gray-800 bg-[#0A0A0A] text-gray-300 hover:bg-gray-800 flex items-center justify-center gap-1"
+                    title="원본 1픽셀 = 1도트 (이미 픽셀 아트인 이미지에 적합)"
+                  >
+                    <Scan className="w-3 h-3" />
+                    <span>원본 1:1</span>
+                  </button>
+                </div>
+
+                {/* 좌표 직접 입력 */}
+                <div className="grid grid-cols-2 gap-2">
+                  {(['placementX', 'placementY'] as const).map(axis => (
+                    <div key={axis}>
+                      <span className="text-[10px] font-mono uppercase text-gray-500 block mb-1">
+                        {axis === 'placementX' ? 'Offset X' : 'Offset Y'}
+                      </span>
+                      <div className="flex items-center gap-2 bg-[#0A0A0A] border border-gray-800 rounded px-2.5 py-1">
+                        <input
+                          type="number"
+                          value={settings[axis]}
+                          onChange={(e) => {
+                            const limit = axis === 'placementX'
+                              ? { size: placement.width, target: settings.targetWidth }
+                              : { size: placement.height, target: settings.targetHeight };
+                            // 이미지를 캔버스 밖으로 완전히 밀어내 빈 결과가 나오는 것을 막는다
+                            const clamped = Math.max(-limit.size + 1, Math.min(limit.target - 1, Number(e.target.value)));
+                            updatePlacement({ [axis]: clamped } as Partial<ImageConversionSettings>);
+                          }}
+                          className="w-full bg-transparent font-mono text-xs text-white focus:outline-none"
+                        />
+                        <span className="text-[10px] text-gray-600 font-mono">px</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* 3. 팔레트 & 디더링 */}
             <div className="grid grid-cols-2 gap-3">

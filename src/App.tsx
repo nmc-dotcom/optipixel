@@ -30,8 +30,8 @@ import { CanvasSizeModal } from './components/CanvasSizeModal';
 import { ExportModal } from './components/ExportModal';
 import { CodeExportModal } from './components/CodeExportModal';
 import { FiltersModal } from './components/FiltersModal';
+import { createHistoryStep, pushHistoryStep } from './utils/history';
 
-const MAX_HISTORY = 35;
 const STORAGE_PALETTES_KEY = 'optipixel_custom_palettes';
 
 export default function App() {
@@ -207,20 +207,9 @@ export default function App() {
 
   // 히스토리 스냅샷 푸시
   const pushHistory = useCallback((desc: string = '변경') => {
-    setHistoryPast(prev => {
-      const currentStep: HistoryStep = {
-        layers: JSON.parse(JSON.stringify(layers)),
-        groups: JSON.parse(JSON.stringify(groups)),
-        width: dimensions.width,
-        height: dimensions.height,
-        description: desc,
-      };
-      const updated = [...prev, currentStep];
-      if (updated.length > MAX_HISTORY) {
-        return updated.slice(updated.length - MAX_HISTORY);
-      }
-      return updated;
-    });
+    setHistoryPast(prev =>
+      pushHistoryStep(prev, createHistoryStep(layers, groups, dimensions.width, dimensions.height, desc))
+    );
     setHistoryFuture([]);
   }, [layers, groups, dimensions]);
 
@@ -229,13 +218,7 @@ export default function App() {
     if (historyPast.length === 0) return;
 
     const previousStep = historyPast[historyPast.length - 1];
-    const currentStep: HistoryStep = {
-      layers: JSON.parse(JSON.stringify(layers)),
-      groups: JSON.parse(JSON.stringify(groups)),
-      width: dimensions.width,
-      height: dimensions.height,
-      description: '되돌리기 전',
-    };
+    const currentStep = createHistoryStep(layers, groups, dimensions.width, dimensions.height, '되돌리기 전');
 
     setHistoryFuture(prev => [currentStep, ...prev]);
     setHistoryPast(prev => prev.slice(0, prev.length - 1));
@@ -255,15 +238,9 @@ export default function App() {
     if (historyFuture.length === 0) return;
 
     const nextStep = historyFuture[0];
-    const currentStep: HistoryStep = {
-      layers: JSON.parse(JSON.stringify(layers)),
-      groups: JSON.parse(JSON.stringify(groups)),
-      width: dimensions.width,
-      height: dimensions.height,
-      description: '다시 실행 전',
-    };
+    const currentStep = createHistoryStep(layers, groups, dimensions.width, dimensions.height, '다시 실행 전');
 
-    setHistoryPast(prev => [...prev, currentStep]);
+    setHistoryPast(prev => pushHistoryStep(prev, currentStep));
     setHistoryFuture(prev => prev.slice(1));
 
     setLayers(nextStep.layers);

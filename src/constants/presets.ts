@@ -1,5 +1,9 @@
 import { PalettePreset } from '../types';
 
+/** 캔버스 한 변의 최소 / 최대 픽셀 수 (커스텀 크기, 이미지 변환 타겟 공통) */
+export const MIN_CANVAS_SIZE = 4;
+export const MAX_CANVAS_SIZE = 256;
+
 export const RESOLUTION_PRESETS = [
   { label: '8 × 8 (마이크로/아이콘)', width: 8, height: 8 },
   { label: '16 × 16 (레트로 스프라이트)', width: 16, height: 16 },
@@ -8,6 +12,7 @@ export const RESOLUTION_PRESETS = [
   { label: '48 × 48 (디테일 스프라이트)', width: 48, height: 48 },
   { label: '64 × 64 (고해상도 도트)', width: 64, height: 64 },
   { label: '128 × 128 (대형 일러스트)', width: 128, height: 128 },
+  { label: '256 × 256 (초대형 일러스트)', width: 256, height: 256 },
 ];
 
 export const DEFAULT_PALETTES: PalettePreset[] = [

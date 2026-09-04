@@ -324,6 +324,18 @@ export function compositeLayers(
         if (srcAlpha <= 0) continue;
 
         const pIdx = idx * 4;
+
+        // 완전 불투명한 픽셀은 아래를 그대로 덮으므로 블렌딩 계산을 건너뛴다.
+        // 도트 이미지는 대부분의 픽셀이 여기에 해당해서, 캔버스가 커질수록
+        // 이 분기가 합성 프레임 시간을 크게 좌우한다.
+        if (srcAlpha >= 1) {
+          data[pIdx] = src.r;
+          data[pIdx + 1] = src.g;
+          data[pIdx + 2] = src.b;
+          data[pIdx + 3] = 255;
+          continue;
+        }
+
         const dstR = data[pIdx];
         const dstG = data[pIdx + 1];
         const dstB = data[pIdx + 2];
