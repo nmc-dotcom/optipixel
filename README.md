@@ -44,6 +44,41 @@ Vite로 만들어졌으며, 이미지 도트 변환부터 레이어 편집, 애�
 - `npm run lint` — TypeScript 타입 체크
 - `npm test` — 테스트 실행 (`npm run test:watch`로 감시 모드)
 
+## 브라우저로 확인하기
+
+실제 브라우저(Playwright + Chromium)로 앱을 띄워 스크린샷을 남기고 콘솔 오류를
+잡을 수 있습니다.
+
+```
+npm run browser                      # 에디터 첫 화면을 screenshots/에 캡처
+node scripts/browser.mjs --out /tmp  # 저장 위치 지정
+node scripts/browser.mjs --headed    # 창을 띄워서 보기 (X 서버 필요)
+```
+
+dev 서버가 이미 떠 있으면 그것을 쓰고, 없으면 직접 띄웠다가 끝나면 정리합니다.
+콘솔 오류나 처리되지 않은 예외가 있으면 목록으로 보고하고 종료 코드 1을 냅니다.
+
+**최초 1회 준비** — Chromium 바이너리는 `npm install`로 받아지지 않고, 실행에
+필요한 시스템 라이브러리(94개)도 따로 깔아야 합니다.
+
+```
+npx playwright install chromium             # 브라우저 바이너리 (~/.cache/ms-playwright)
+sudo npx playwright install-deps chromium   # 시스템 라이브러리 (root 필요)
+```
+
+브라우저 바이너리는 반드시 **사용자 계정으로** 받아야 합니다. `sudo`로 받으면
+root의 캐시에 들어가 앱에서 찾지 못합니다.
+
+root를 쓸 수 없는 환경(권한 없는 컨테이너 등)이라면 두 번째 줄 대신:
+
+```
+bash scripts/setup-browser-sysroot.sh
+```
+
+같은 .deb들을 `~/.local/share/chromium-sysroot`에 풀어두고, `scripts/browser.mjs`가
+그 경로를 자동으로 찾아 `LD_LIBRARY_PATH`로 물려줍니다. 시스템에 정식으로 설치돼
+있으면 이 디렉터리가 없으므로 그냥 기본 환경을 씁니다.
+
 ## 테스트
 
 픽셀 좌표 계산, 프로젝트 직렬화, 외부 입력 파싱처럼 조용히 틀리기 쉬운 순수 함수를
