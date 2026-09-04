@@ -12,6 +12,9 @@ import {
 } from '../utils/imageConverter';
 import { Upload, X, Sliders, Sparkles, RefreshCw, Check, Wand2, Move, Crosshair, Maximize, Scan } from 'lucide-react';
 
+/** 변환 프리뷰 상자의 한 변 (px) */
+const PREVIEW_VIEWPORT_PX = 280;
+
 interface ImageToPixelModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -75,6 +78,18 @@ export const ImageToPixelModal: React.FC<ImageToPixelModalProps> = ({
   }, [isOpen, currentWidth, currentHeight]);
 
   const isManual = settings.fitMode === 'manual';
+
+  /**
+   * 프리뷰 캔버스의 표시 배율.
+   *
+   * 가로/세로에 각각 상한을 걸면 비정방형 캔버스가 정사각형으로 눌려 실제 결과와
+   * 다르게 보인다. 긴 변을 기준으로 정수 배율을 잡아 비율을 지키고, 확대해도
+   * 픽셀 격자의 폭이 고르게 유지되도록 한다.
+   */
+  const previewScale = Math.max(
+    1,
+    Math.floor(PREVIEW_VIEWPORT_PX / Math.max(settings.targetWidth, settings.targetHeight))
+  );
 
   // 현재 설정으로 이미지가 캔버스 위에 놓이는 사각형 (변환 엔진과 동일한 계산)
   const placement = loadedImage
@@ -397,8 +412,8 @@ export const ImageToPixelModal: React.FC<ImageToPixelModalProps> = ({
                     onPointerUp={handlePlacementPointerUp}
                     onPointerCancel={handlePlacementPointerUp}
                     style={{
-                      width: Math.min(280, settings.targetWidth * 8),
-                      height: Math.min(280, settings.targetHeight * 8),
+                      width: settings.targetWidth * previewScale,
+                      height: settings.targetHeight * previewScale,
                       touchAction: isManual ? 'none' : undefined,
                     }}
                     className={`pixelated shadow-2xl border rounded-sm max-w-full max-h-[280px] ${

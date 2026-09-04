@@ -24,6 +24,9 @@ import {
   AlertCircle
 } from 'lucide-react';
 
+/** 애니메이션 뷰어 상자의 한 변 (px). 아래 w-64 h-64와 맞춰야 한다. */
+const ANIM_VIEWPORT_PX = 256;
+
 interface ExportModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -53,6 +56,16 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     () => frames.map(f => flattenLayers(f.layers, f.groups, width, height)),
     [frames, width, height]
   );
+
+  /**
+   * 애니메이션 뷰어의 표시 배율.
+   *
+   * 예전에는 캔버스를 무조건 8배로 그렸는데, 뷰포트가 256px 고정이라 32px가 넘는
+   * 캔버스는 상자를 넘어가 좌상단 일부만 보였다. 이제 캔버스 버퍼는 원본 해상도로
+   * 두고 상자에 들어가는 정수 배율로 확대해 보여준다. 정수 배율이라 확대해도
+   * 픽셀 격자의 폭이 고르게 유지된다.
+   */
+  const animScale = Math.max(1, Math.floor(ANIM_VIEWPORT_PX / Math.max(width, height)));
   const [activeTab, setActiveTab] = useState<'single' | 'stripe' | 'animation'>('stripe');
   const [copiedCss, setCopiedCss] = useState(false);
 
@@ -119,21 +132,13 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     const canvas = animCanvasRef.current;
     if (!canvas) return;
 
-    const scale = 8;
-    canvas.width = width * scale;
-    canvas.height = height * scale;
+    // 버퍼는 원본 해상도. 확대는 CSS(image-rendering: pixelated)가 맡는다.
+    canvas.width = width;
+    canvas.height = height;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    ctx.imageSmoothingEnabled = false;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    // 합성된 프레임 ImageData 렌더
-    const temp = document.createElement('canvas');
-    temp.width = width;
-    temp.height = height;
-    const tctx = temp.getContext('2d')!;
-    const imgData = tctx.createImageData(width, height);
+    const imgData = ctx.createImageData(width, height);
     for (let i = 0; i < target.length; i++) {
       const hex = target[i];
       if (hex) {
@@ -145,8 +150,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         imgData.data[pIdx + 3] = 255;
       }
     }
-    tctx.putImageData(imgData, 0, 0);
-    ctx.drawImage(temp, 0, 0, width, height, 0, 0, canvas.width, canvas.height);
+    ctx.putImageData(imgData, 0, 0);
   }, [isOpen, activeTab, currentFrameIdx, framePixels, width, height]);
 
   if (!isOpen) return null;
@@ -532,11 +536,15 @@ export const ExportModal: React.FC<ExportModalProps> = ({
           {activeTab === 'animation' && (
             <div className="flex flex-col items-center gap-4">
               <div className="text-xs text-gray-400 text-center max-w-lg">
-                표시 가능한 각 레이어를 순차적인 애니메이션 프레임으로 루프 재생합니다. 캐릭터 걷기, 점프, 공격 등의 모션을 확인하세요.
+                각 프레임을 순차적으로 루프 재생합니다. 캐릭터 걷기, 점프, 공격 등의 모션을 확인하세요.
               </div>
 
               <div className="w-64 h-64 bg-checkered rounded-lg border border-gray-800 flex items-center justify-center shadow-inner overflow-hidden">
-                <canvas ref={animCanvasRef} className="pixelated shadow-lg" />
+                <canvas
+                  ref={animCanvasRef}
+                  style={{ width: width * animScale, height: height * animScale }}
+                  className="pixelated shadow-lg max-w-full max-h-full"
+                />
               </div>
 
               {/* 애니메이션 재생 컨트롤 */}
