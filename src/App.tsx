@@ -144,6 +144,33 @@ export default function App() {
   // 7. 스프라이트 애니메이션 & 어니언 스킨 상태
   const [onionSkinEnabled, setOnionSkinEnabled] = useState<boolean>(false);
 
+  /**
+   * 좁은 화면에서 도구 막대는 화면 아래에 떠 있어 흐름에서 빠져 있고, 그대로 두면
+   * 그 아래 내용(타임라인, 상태바)을 덮는다. 줄바꿈 때문에 높이가 달라지므로
+   * 상수로 비워두면 어긋난다 — 실제 높이를 재서 그만큼 셸 바닥을 비운다.
+   * 데스크탑에서는 막대가 흐름 안에 있으므로(position: static) 0이 된다.
+   */
+  const [floatingToolbarInset, setFloatingToolbarInset] = useState(0);
+
+  useEffect(() => {
+    const el = document.getElementById('floating-toolbar');
+    if (!el) return;
+
+    const update = () => {
+      const isFloating = window.getComputedStyle(el).position === 'fixed';
+      setFloatingToolbarInset(isFloating ? Math.ceil(el.getBoundingClientRect().height) + 24 : 0);
+    };
+
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    window.addEventListener('resize', update);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', update);
+    };
+  }, []);
+
   // 이전 프레임을 합성한 잔상 픽셀 (첫 프레임에서는 없음)
   const onionSkinPixels = useMemo(() => {
     if (!onionSkinEnabled) return null;
@@ -849,10 +876,11 @@ export default function App() {
     handleUpdateLayerPixels(activeLayerId, emptyPixels, false);
   };
 
-  // 작은 화면에서는 도구 막대가 화면 아래에 떠 있다. 그 높이(막대 50px + 아래 여백 12px)
-  // 만큼 셸 바닥을 비워 두어야 상태바와 프레임 목록이 막대에 가리지 않는다.
   return (
-    <div className="app-shell w-full flex flex-col overflow-hidden pb-[68px] md:pb-0 dark bg-[#0A0A0A] text-gray-300">
+    <div
+      className="app-shell w-full flex flex-col overflow-hidden dark bg-[#0A0A0A] text-gray-300"
+      style={{ paddingBottom: floatingToolbarInset }}
+    >
       {/* 1. 상단 내비게이션 바 */}
       <Navbar
         canvasWidth={dimensions.width}
@@ -1087,7 +1115,9 @@ export default function App() {
       </div>
 
       {/* Elegant Dark 하단 상태 바 */}
-      <footer className="h-7 bg-[#111111] border-t border-gray-800 px-4 flex items-center justify-between text-[10px] text-gray-500 shrink-0 font-mono select-none">
+      {/* 상태바: 도구·캔버스 크기·배율은 좁은 화면에서 각각 도구 막대, 상단 바,
+          캔버스 오버레이에 이미 보이므로 자리를 양보한다 */}
+      <footer className="h-7 bg-[#111111] border-t border-gray-800 px-4 hidden md:flex items-center justify-between text-[10px] text-gray-500 shrink-0 font-mono select-none">
         <div className="flex items-center gap-3">
           <span className="flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />

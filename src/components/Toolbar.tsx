@@ -69,9 +69,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   ];
 
   return (
-    <aside className="fixed bottom-3 left-1/2 -translate-x-1/2 md:translate-x-0 md:static md:left-auto md:bottom-auto w-[94%] max-w-fit md:w-14 bg-[#111111] border border-gray-800 rounded-xl md:rounded-none md:border-r md:border-l-0 md:border-t-0 md:border-b-0 p-2 md:py-3 flex md:flex-col items-center justify-between md:justify-start gap-1 md:gap-2 z-30 md:z-20 shadow-2xl md:shadow-none overflow-x-auto">
+    <aside id="floating-toolbar" className="fixed bottom-3 left-1/2 -translate-x-1/2 md:translate-x-0 md:static md:left-auto md:bottom-auto w-[94%] md:w-14 md:max-w-fit bg-[#111111] border border-gray-800 rounded-xl md:rounded-none md:border-r md:border-l-0 md:border-t-0 md:border-b-0 p-2 md:py-3 flex flex-wrap md:flex-col md:flex-nowrap items-center justify-center md:justify-start gap-1 md:gap-2 z-30 md:z-20 shadow-2xl md:shadow-none">
       {/* 도구 모음 */}
-      <div className="flex md:flex-col items-center gap-1">
+      <div className="flex flex-wrap md:flex-nowrap md:flex-col items-center justify-center gap-1">
         {tools.map(tool => {
           const isActive = currentTool === tool.id;
           return (
@@ -97,7 +97,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
       <div className="w-px h-6 md:w-8 md:h-px bg-gray-800 shrink-0 my-0.5" />
 
       {/* 브러시 크기 (1px ~ 4px) */}
-      <div className="flex md:flex-col items-center gap-1">
+      <div className="flex flex-wrap md:flex-nowrap md:flex-col items-center justify-center gap-1">
         {[1, 2, 3, 4].map(size => (
           <button
             key={size}
@@ -121,7 +121,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
       {/* 마술봉 허용 오차 (마술봉 선택 시에만 노출) */}
       {currentTool === 'wand' && (
         <>
-          <div className="flex md:flex-col items-center gap-1">
+          <div className="flex flex-wrap md:flex-nowrap md:flex-col items-center justify-center gap-1">
             {[0, 10, 20, 40].map(tol => (
               <button
                 key={tol}
@@ -144,7 +144,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
       )}
 
       {/* 도형 채우기 및 대칭 드로잉 */}
-      <div className="flex md:flex-col items-center gap-1">
+      <div className="flex flex-wrap md:flex-nowrap md:flex-col items-center justify-center gap-1">
         {/* 도형 채우기 토글 (도형 도구 선택 시 활성) */}
         {(currentTool === 'rect' || currentTool === 'circle') && (
           <button
