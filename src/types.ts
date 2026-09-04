@@ -42,6 +42,20 @@ export interface Layer {
   pixels: string[]; // Length = width * height, stored as HEX ("#RRGGBB" or "#RRGGBBAA") or "" for transparent
 }
 
+/**
+ * 애니메이션 프레임. 자기만의 레이어 스택과 그룹을 소유한다.
+ *
+ * 예전에는 레이어 하나가 곧 프레임 하나였기 때문에 한 프레임 안에
+ * 배경/캐릭터처럼 여러 레이어를 둘 수 없었다. 이제 레이어는 프레임에
+ * 속하고, 타임라인은 프레임을, 레이어 패널은 활성 프레임의 레이어를 다룬다.
+ */
+export interface Frame {
+  id: string;
+  name: string;
+  layers: Layer[];
+  groups: LayerGroup[];
+}
+
 export interface CanvasDimensions {
   width: number;
   height: number;
@@ -55,8 +69,7 @@ export interface PalettePreset {
 }
 
 export interface HistoryStep {
-  layers: Layer[];
-  groups: LayerGroup[];
+  frames: Frame[];
   width: number;
   height: number;
   description: string;

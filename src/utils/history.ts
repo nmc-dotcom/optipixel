@@ -1,4 +1,4 @@
-import { HistoryStep, Layer, LayerGroup } from '../types';
+import { Frame, HistoryStep } from '../types';
 
 /** 보관하는 실행취소 단계 수 */
 export const MAX_HISTORY = 35;
@@ -6,7 +6,7 @@ export const MAX_HISTORY = 35;
 /**
  * 히스토리에 담을 상태 스냅샷을 만든다.
  *
- * 레이어/그룹 객체는 새로 만들지만 `pixels` 배열은 **원본과 공유한다**.
+ * 프레임/레이어/그룹 객체는 새로 만들지만 `pixels` 배열은 **원본과 공유한다**.
  * 에디터의 모든 픽셀 편집 경로가 기존 배열을 그 자리에서 고치지 않고 새 배열로
  * 교체하는(copy-on-write) 규약을 지키므로, 배열을 공유해도 과거 스냅샷이
  * 나중 편집에 오염되지 않는다. 반대로 이 규약을 깨고 `layer.pixels[i] = ...`
@@ -17,15 +17,17 @@ export const MAX_HISTORY = 35;
  * 30만 개가 넘는 문자열을 새로 만들었고, 그것을 35단계까지 붙들고 있었다.)
  */
 export function createHistoryStep(
-  layers: Layer[],
-  groups: LayerGroup[],
+  frames: Frame[],
   width: number,
   height: number,
   description: string
 ): HistoryStep {
   return {
-    layers: layers.map(layer => ({ ...layer })),
-    groups: groups.map(group => ({ ...group })),
+    frames: frames.map(frame => ({
+      ...frame,
+      layers: frame.layers.map(layer => ({ ...layer })),
+      groups: frame.groups.map(group => ({ ...group })),
+    })),
     width,
     height,
     description,

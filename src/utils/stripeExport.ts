@@ -1,11 +1,11 @@
-import { Layer, LayerGroup, StripeExportSettings } from '../types';
-import { hexToRgba } from './pixelEngine';
+import { Frame, StripeExportSettings } from '../types';
+import { flattenLayers, hexToRgba } from './pixelEngine';
 
 /**
- * 개별 레이어를 단일 ImageData로 렌더링
+ * 합성된 프레임 픽셀을 캔버스 하나로 렌더링
  */
-function renderSingleLayerToCanvas(
-  layer: Layer,
+function renderFramePixelsToCanvas(
+  pixels: string[],
   width: number,
   height: number
 ): HTMLCanvasElement {
@@ -16,12 +16,10 @@ function renderSingleLayerToCanvas(
   const imgData = ctx.createImageData(width, height);
   const data = imgData.data;
 
-  const opacity = Math.max(0, Math.min(1, layer.opacity));
-
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const idx = y * width + x;
-      const color = layer.pixels[idx];
+      const color = pixels[idx];
       if (!color) continue;
 
       const rgba = hexToRgba(color);
@@ -29,7 +27,7 @@ function renderSingleLayerToCanvas(
       data[pIdx] = rgba.r;
       data[pIdx + 1] = rgba.g;
       data[pIdx + 2] = rgba.b;
-      data[pIdx + 3] = Math.round(rgba.a * opacity * 255);
+      data[pIdx + 3] = Math.round(rgba.a * 255);
     }
   }
 
@@ -38,29 +36,26 @@ function renderSingleLayerToCanvas(
 }
 
 /**
- * 레이어들을 조합하여 스트라이프(스프라이트 스트립 / 시트) 캔버스 생성
+ * 프레임들을 조합하여 스트라이프(스프라이트 스트립 / 시트) 캔버스 생성.
+ * 프레임 하나가 시트의 칸 하나가 되며, 각 칸은 그 프레임의 레이어를 합성한 그림이다.
  */
 export function generateStripeCanvas(
-  layers: Layer[],
-  groups: LayerGroup[],
+  frames: Frame[],
   width: number,
   height: number,
   settings: StripeExportSettings
 ): HTMLCanvasElement {
   const { layout, scale = 1, spacing = 0, backgroundColor, includeHiddenLayers } = settings;
 
-  const groupVisibilityMap = new Map<string, boolean>();
-  groups.forEach(g => groupVisibilityMap.set(g.id, g.visible));
+  // includeHiddenLayers는 프레임 안에서 숨겨둔 레이어까지 그릴지를 정한다
+  const framePixels = frames.map(frame => flattenLayers(
+    includeHiddenLayers ? frame.layers.map(l => ({ ...l, visible: true })) : frame.layers,
+    includeHiddenLayers ? frame.groups.map(g => ({ ...g, visible: true })) : frame.groups,
+    width,
+    height
+  ));
 
-  // 대상 레이어 필터링
-  const targetLayers = layers.filter(l => {
-    if (includeHiddenLayers) return true;
-    if (!l.visible) return false;
-    if (l.groupId && groupVisibilityMap.get(l.groupId) === false) return false;
-    return true;
-  });
-
-  const frameCount = Math.max(1, targetLayers.length);
+  const frameCount = Math.max(1, framePixels.length);
   const frameW = width * scale;
   const frameH = height * scale;
 
@@ -103,7 +98,7 @@ export function generateStripeCanvas(
   }
 
   // 각 프레임 그리기
-  targetLayers.forEach((layer, index) => {
+  framePixels.forEach((pixels, index) => {
     let col = 0;
     let row = 0;
 
@@ -121,8 +116,8 @@ export function generateStripeCanvas(
     const posX = col * (frameW + spacing);
     const posY = row * (frameH + spacing);
 
-    const layerCanvas = renderSingleLayerToCanvas(layer, width, height);
-    ctx.drawImage(layerCanvas, 0, 0, width, height, posX, posY, frameW, frameH);
+    const frameCanvas = renderFramePixelsToCanvas(pixels, width, height);
+    ctx.drawImage(frameCanvas, 0, 0, width, height, posX, posY, frameW, frameH);
   });
 
   return canvas;
@@ -179,26 +174,15 @@ export function downloadJsonFile(jsonContent: string, filename: string = 'sprite
  * 2D 게임 엔진 (Phaser, PixiJS, TexturePacker) 호환 JSON Sprite Atlas 생성
  */
 export function generateSpriteAtlasJson(
-  layers: Layer[],
-  groups: LayerGroup[],
+  sourceFrames: Frame[],
   width: number,
   height: number,
   settings: StripeExportSettings,
   imageFilename: string = 'spritesheet.png'
 ): string {
-  const { layout, scale = 1, spacing = 0, includeHiddenLayers } = settings;
+  const { layout, scale = 1, spacing = 0 } = settings;
 
-  const groupVisibilityMap = new Map<string, boolean>();
-  groups.forEach(g => groupVisibilityMap.set(g.id, g.visible));
-
-  const targetLayers = layers.filter(l => {
-    if (includeHiddenLayers) return true;
-    if (!l.visible) return false;
-    if (l.groupId && groupVisibilityMap.get(l.groupId) === false) return false;
-    return true;
-  });
-
-  const frameCount = Math.max(1, targetLayers.length);
+  const frameCount = Math.max(1, sourceFrames.length);
   const frameW = width * scale;
   const frameH = height * scale;
 
@@ -226,7 +210,7 @@ export function generateSpriteAtlasJson(
 
   const frames: Record<string, any> = {};
 
-  targetLayers.forEach((layer, index) => {
+  sourceFrames.forEach((frame, index) => {
     let col = 0;
     let row = 0;
 
@@ -243,7 +227,7 @@ export function generateSpriteAtlasJson(
 
     const posX = col * (frameW + spacing);
     const posY = row * (frameH + spacing);
-    const frameName = `${layer.name.replace(/\s+/g, '_')}_${index}`;
+    const frameName = `${frame.name.replace(/\s+/g, '_')}_${index}`;
 
     frames[frameName] = {
       frame: { x: posX, y: posY, w: frameW, h: frameH },

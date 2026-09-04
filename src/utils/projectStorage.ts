@@ -1,8 +1,12 @@
-import { Layer, LayerGroup } from '../types';
+import { Frame, Layer, LayerGroup } from '../types';
 
 const STORAGE_PROJECT_KEY = 'optipixel_project';
 const PROJECT_FORMAT = 'optipixel-project';
-const PROJECT_VERSION = 1;
+/**
+ * 2 = 프레임이 레이어를 소유하는 형식.
+ * 1은 레이어 하나가 곧 프레임 하나였다 (deserializeProject가 자동 변환한다).
+ */
+const PROJECT_VERSION = 2;
 
 /** [반복 횟수, 색상] 쌍의 배열로 픽셀을 런-렝스 압축한 형태 */
 type RlePixels = Array<[number, string]>;
@@ -17,24 +21,38 @@ interface SerializedLayer {
   rle: RlePixels;
 }
 
+interface SerializedFrame {
+  id: string;
+  name: string;
+  groups: LayerGroup[];
+  layers: SerializedLayer[];
+}
+
 export interface ProjectFile {
   format: typeof PROJECT_FORMAT;
   version: number;
   width: number;
   height: number;
+  activeFrameId: string;
   activeLayerId: string;
-  groups: LayerGroup[];
-  layers: SerializedLayer[];
+  frames: SerializedFrame[];
   savedAt: string;
+}
+
+/** version 1 파일의 형태 (레이어 = 프레임) */
+interface LegacyProjectFile {
+  activeLayerId?: unknown;
+  groups?: unknown;
+  layers?: unknown;
 }
 
 /** 저장/복원 시 주고받는 프로젝트 상태 */
 export interface ProjectState {
   width: number;
   height: number;
+  activeFrameId: string;
   activeLayerId: string;
-  groups: LayerGroup[];
-  layers: Layer[];
+  frames: Frame[];
 }
 
 /**
@@ -72,22 +90,31 @@ function decodePixels(rle: RlePixels, expectedLength: number): string[] {
   return out;
 }
 
+function serializeLayer(layer: Layer): SerializedLayer {
+  return {
+    id: layer.id,
+    name: layer.name,
+    groupId: layer.groupId ?? null,
+    visible: layer.visible,
+    locked: layer.locked,
+    opacity: layer.opacity,
+    rle: encodePixels(layer.pixels),
+  };
+}
+
 export function serializeProject(state: ProjectState): ProjectFile {
   return {
     format: PROJECT_FORMAT,
     version: PROJECT_VERSION,
     width: state.width,
     height: state.height,
+    activeFrameId: state.activeFrameId,
     activeLayerId: state.activeLayerId,
-    groups: state.groups,
-    layers: state.layers.map(layer => ({
-      id: layer.id,
-      name: layer.name,
-      groupId: layer.groupId ?? null,
-      visible: layer.visible,
-      locked: layer.locked,
-      opacity: layer.opacity,
-      rle: encodePixels(layer.pixels),
+    frames: state.frames.map(frame => ({
+      id: frame.id,
+      name: frame.name,
+      groups: frame.groups,
+      layers: frame.layers.map(serializeLayer),
     })),
     savedAt: new Date().toISOString(),
   };
@@ -97,19 +124,12 @@ export function serializeProject(state: ProjectState): ProjectFile {
  * 외부에서 들어온 데이터(파일/로컬 저장소)를 검증하며 프로젝트 상태로 복원한다.
  * 형식이 맞지 않으면 null을 반환한다.
  */
-export function deserializeProject(data: unknown): ProjectState | null {
-  if (!data || typeof data !== 'object') return null;
-  const raw = data as Partial<ProjectFile>;
-
-  if (raw.format !== PROJECT_FORMAT) return null;
-  if (typeof raw.width !== 'number' || typeof raw.height !== 'number') return null;
-  if (raw.width < 1 || raw.height < 1 || raw.width > 512 || raw.height > 512) return null;
-  if (!Array.isArray(raw.layers) || raw.layers.length === 0) return null;
-
-  const pixelCount = raw.width * raw.height;
-
+/** 직렬화된 레이어 목록을 검증하며 복원한다 (형식이 깨진 항목은 건너뛴다) */
+function decodeLayers(raw: unknown, pixelCount: number): Layer[] {
+  if (!Array.isArray(raw)) return [];
   const layers: Layer[] = [];
-  for (const item of raw.layers) {
+
+  for (const item of raw) {
     if (!item || typeof item !== 'object') continue;
     const l = item as Partial<SerializedLayer>;
     if (typeof l.id !== 'string' || typeof l.name !== 'string') continue;
@@ -126,23 +146,88 @@ export function deserializeProject(data: unknown): ProjectState | null {
     });
   }
 
-  if (layers.length === 0) return null;
+  return layers;
+}
 
-  const groups: LayerGroup[] = Array.isArray(raw.groups)
-    ? raw.groups.filter((g): g is LayerGroup =>
+function decodeGroups(raw: unknown): LayerGroup[] {
+  return Array.isArray(raw)
+    ? raw.filter((g): g is LayerGroup =>
         !!g &&
         typeof g === 'object' &&
         typeof (g as LayerGroup).id === 'string' &&
         typeof (g as LayerGroup).name === 'string'
       )
     : [];
+}
 
+/**
+ * version 1 파일을 현재 형식으로 올린다.
+ *
+ * 예전에는 레이어 목록이 그대로 프레임 목록이기도 해서, 어느 쪽 의도로 만든
+ * 파일인지 데이터만 보고는 알 수 없다. 캔버스에 보이던 그림(= 모든 레이어를
+ * 합성한 결과)이 그대로 유지되는 쪽을 택해, 전체를 레이어 스택 하나를 가진
+ * 프레임 한 장으로 옮긴다. 애니메이션으로 쓰던 파일이라면 프레임들이 한 장에
+ * 겹쳐 들어오므로, 타임라인에서 레이어를 프레임으로 나눠주면 된다.
+ */
+function migrateLegacyProject(raw: LegacyProjectFile, pixelCount: number): Frame[] {
+  const layers = decodeLayers(raw.layers, pixelCount);
+  if (layers.length === 0) return [];
+
+  return [{
+    id: 'frame-1',
+    name: '프레임 1',
+    groups: decodeGroups(raw.groups),
+    layers,
+  }];
+}
+
+export function deserializeProject(data: unknown): ProjectState | null {
+  if (!data || typeof data !== 'object') return null;
+  const raw = data as Partial<ProjectFile> & LegacyProjectFile;
+
+  if (raw.format !== PROJECT_FORMAT) return null;
+  if (typeof raw.width !== 'number' || typeof raw.height !== 'number') return null;
+  if (raw.width < 1 || raw.height < 1 || raw.width > 512 || raw.height > 512) return null;
+
+  const pixelCount = raw.width * raw.height;
+  const frames: Frame[] = [];
+
+  if (Array.isArray(raw.frames)) {
+    for (const item of raw.frames) {
+      if (!item || typeof item !== 'object') continue;
+      const f = item as Partial<SerializedFrame>;
+      if (typeof f.id !== 'string') continue;
+
+      const layers = decodeLayers(f.layers, pixelCount);
+      if (layers.length === 0) continue;
+
+      frames.push({
+        id: f.id,
+        name: typeof f.name === 'string' ? f.name : `프레임 ${frames.length + 1}`,
+        groups: decodeGroups(f.groups),
+        layers,
+      });
+    }
+  } else {
+    frames.push(...migrateLegacyProject(raw, pixelCount));
+  }
+
+  if (frames.length === 0) return null;
+
+  const activeFrame =
+    frames.find(f => f.id === raw.activeFrameId) ?? frames[0];
   const activeLayerId =
-    typeof raw.activeLayerId === 'string' && layers.some(l => l.id === raw.activeLayerId)
+    typeof raw.activeLayerId === 'string' && activeFrame.layers.some(l => l.id === raw.activeLayerId)
       ? raw.activeLayerId
-      : layers[layers.length - 1].id;
+      : activeFrame.layers[activeFrame.layers.length - 1].id;
 
-  return { width: raw.width, height: raw.height, activeLayerId, groups, layers };
+  return {
+    width: raw.width,
+    height: raw.height,
+    activeFrameId: activeFrame.id,
+    activeLayerId,
+    frames,
+  };
 }
 
 /**

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   CanvasDimensions,
+  Frame,
   HistoryStep,
   Layer,
   LayerGroup,
@@ -11,7 +12,7 @@ import {
 } from './types';
 import { X } from 'lucide-react';
 import { DEFAULT_PALETTES, generateInitialPixels } from './constants/presets';
-import { blendPixelArrays, clearRegion, copyRegion, pasteRegion } from './utils/pixelEngine';
+import { blendPixelArrays, clearRegion, copyRegion, flattenLayers, pasteRegion } from './utils/pixelEngine';
 import {
   downloadProjectFile,
   loadProjectFromStorage,
@@ -42,23 +43,53 @@ export default function App() {
   const [dimensions, setDimensions] = useState<CanvasDimensions>(
     restored ? { width: restored.width, height: restored.height } : { width: 24, height: 24 }
   );
-  const [groups, setGroups] = useState<LayerGroup[]>(restored?.groups ?? []);
-  const [layers, setLayers] = useState<Layer[]>(() => {
-    if (restored) return restored.layers;
-    const initialPixels = generateInitialPixels(24, 24);
-    return [
-      {
+  const [frames, setFrames] = useState<Frame[]>(() => {
+    if (restored) return restored.frames;
+    return [{
+      id: 'frame-1',
+      name: '프레임 1',
+      groups: [],
+      layers: [{
         id: 'layer-base',
         name: '레이어 1 (메인)',
         groupId: null,
         visible: true,
         locked: false,
         opacity: 1.0,
-        pixels: initialPixels,
-      }
-    ];
+        pixels: generateInitialPixels(24, 24),
+      }],
+    }];
   });
+  const [activeFrameId, setActiveFrameId] = useState<string>(restored?.activeFrameId ?? 'frame-1');
   const [activeLayerId, setActiveLayerId] = useState<string>(restored?.activeLayerId ?? 'layer-base');
+
+  // 활성 프레임. 프레임이 사라진 뒤에도 화면이 깨지지 않도록 첫 프레임으로 되돌린다.
+  const activeFrame = frames.find(f => f.id === activeFrameId) ?? frames[0];
+  const layers = activeFrame.layers;
+  const groups = activeFrame.groups;
+
+  /**
+   * 활성 프레임의 레이어 목록만 바꾼다.
+   *
+   * 레이어를 다루는 기존 핸들러들이 프레임 구조를 몰라도 되도록 setLayers와
+   * 같은 모양을 유지한다. 바뀌지 않은 프레임과 레이어의 pixels 배열은 그대로
+   * 공유되므로 실행취소 스냅샷의 copy-on-write 규약도 유지된다.
+   */
+  const setLayers = useCallback((update: Layer[] | ((prev: Layer[]) => Layer[])) => {
+    setFrames(prev => prev.map(frame =>
+      frame.id === activeFrameId
+        ? { ...frame, layers: typeof update === 'function' ? update(frame.layers) : update }
+        : frame
+    ));
+  }, [activeFrameId]);
+
+  const setGroups = useCallback((update: LayerGroup[] | ((prev: LayerGroup[]) => LayerGroup[])) => {
+    setFrames(prev => prev.map(frame =>
+      frame.id === activeFrameId
+        ? { ...frame, groups: typeof update === 'function' ? update(frame.groups) : update }
+        : frame
+    ));
+  }, [activeFrameId]);
 
   // 2. Undo / Redo 실행 취소 스택
   const [historyPast, setHistoryPast] = useState<HistoryStep[]>([]);
@@ -113,13 +144,14 @@ export default function App() {
   // 7. 스프라이트 애니메이션 & 어니언 스킨 상태
   const [onionSkinEnabled, setOnionSkinEnabled] = useState<boolean>(false);
 
-  // 현재 활성 프레임(레이어)의 이전 프레임 잔상 픽셀 연산
+  // 이전 프레임을 합성한 잔상 픽셀 (첫 프레임에서는 없음)
   const onionSkinPixels = useMemo(() => {
     if (!onionSkinEnabled) return null;
-    const activeIdx = layers.findIndex(l => l.id === activeLayerId);
-    if (activeIdx <= 0) return null;
-    return layers[activeIdx - 1]?.pixels || null;
-  }, [layers, activeLayerId, onionSkinEnabled]);
+    const activeIdx = frames.findIndex(f => f.id === activeFrame.id);
+    const previous = frames[activeIdx - 1];
+    if (!previous) return null;
+    return flattenLayers(previous.layers, previous.groups, dimensions.width, dimensions.height);
+  }, [frames, activeFrame.id, onionSkinEnabled, dimensions.width, dimensions.height]);
 
   // 작업물 자동 저장 (편집이 멈춘 뒤 1초 후 저장 — 그리는 동안 매번 직렬화하지 않도록 디바운스)
   const autosaveWarnedRef = useRef(false);
@@ -129,9 +161,9 @@ export default function App() {
       const ok = saveProjectToStorage({
         width: dimensions.width,
         height: dimensions.height,
+        activeFrameId: activeFrame.id,
         activeLayerId,
-        groups,
-        layers,
+        frames,
       });
       // 용량 초과 등으로 저장에 실패하면 한 번만 경고를 띄운다
       if (!ok && !autosaveWarnedRef.current) {
@@ -144,16 +176,16 @@ export default function App() {
     }, 1000);
 
     return () => window.clearTimeout(timeoutId);
-  }, [layers, groups, dimensions, activeLayerId]);
+  }, [frames, activeFrame.id, dimensions, activeLayerId]);
 
   // 프로젝트를 파일로 내보내기
   const handleExportProject = () => {
     downloadProjectFile({
       width: dimensions.width,
       height: dimensions.height,
+      activeFrameId: activeFrame.id,
       activeLayerId,
-      groups,
-      layers,
+      frames,
     });
   };
 
@@ -164,9 +196,9 @@ export default function App() {
     }
     try {
       const project = await readProjectFile(file);
-      setLayers(project.layers);
-      setGroups(project.groups);
+      setFrames(project.frames);
       setDimensions({ width: project.width, height: project.height });
+      setActiveFrameId(project.activeFrameId);
       setActiveLayerId(project.activeLayerId);
       // 다른 프로젝트를 연 뒤의 실행취소는 의미가 없으므로 히스토리를 비운다
       setHistoryPast([]);
@@ -205,52 +237,55 @@ export default function App() {
     }
   };
 
+  /**
+   * 스냅샷의 상태로 되돌린다.
+   * 스냅샷에 없는 프레임/레이어를 가리키고 있을 수 있으므로 선택도 함께 보정한다.
+   */
+  const restoreHistoryStep = useCallback((step: HistoryStep) => {
+    setFrames(step.frames);
+    setDimensions({ width: step.width, height: step.height });
+
+    const frame = step.frames.find(f => f.id === activeFrameId) ?? step.frames[0];
+    if (!frame) return;
+    if (frame.id !== activeFrameId) setActiveFrameId(frame.id);
+    if (!frame.layers.some(l => l.id === activeLayerId)) {
+      setActiveLayerId(frame.layers[frame.layers.length - 1].id);
+    }
+  }, [activeFrameId, activeLayerId]);
+
   // 히스토리 스냅샷 푸시
   const pushHistory = useCallback((desc: string = '변경') => {
     setHistoryPast(prev =>
-      pushHistoryStep(prev, createHistoryStep(layers, groups, dimensions.width, dimensions.height, desc))
+      pushHistoryStep(prev, createHistoryStep(frames, dimensions.width, dimensions.height, desc))
     );
     setHistoryFuture([]);
-  }, [layers, groups, dimensions]);
+  }, [frames, dimensions]);
 
   // 실행 취소 (Undo)
   const handleUndo = useCallback(() => {
     if (historyPast.length === 0) return;
 
     const previousStep = historyPast[historyPast.length - 1];
-    const currentStep = createHistoryStep(layers, groups, dimensions.width, dimensions.height, '되돌리기 전');
+    const currentStep = createHistoryStep(frames, dimensions.width, dimensions.height, '되돌리기 전');
 
     setHistoryFuture(prev => [currentStep, ...prev]);
     setHistoryPast(prev => prev.slice(0, prev.length - 1));
 
-    setLayers(previousStep.layers);
-    setGroups(previousStep.groups);
-    setDimensions({ width: previousStep.width, height: previousStep.height });
-
-    // 활성 레이어가 사라졌을 경우 안전 보정
-    if (!previousStep.layers.some(l => l.id === activeLayerId) && previousStep.layers.length > 0) {
-      setActiveLayerId(previousStep.layers[0].id);
-    }
-  }, [historyPast, layers, groups, dimensions, activeLayerId]);
+    restoreHistoryStep(previousStep);
+  }, [historyPast, frames, dimensions, restoreHistoryStep]);
 
   // 다시 실행 (Redo)
   const handleRedo = useCallback(() => {
     if (historyFuture.length === 0) return;
 
     const nextStep = historyFuture[0];
-    const currentStep = createHistoryStep(layers, groups, dimensions.width, dimensions.height, '다시 실행 전');
+    const currentStep = createHistoryStep(frames, dimensions.width, dimensions.height, '다시 실행 전');
 
     setHistoryPast(prev => pushHistoryStep(prev, currentStep));
     setHistoryFuture(prev => prev.slice(1));
 
-    setLayers(nextStep.layers);
-    setGroups(nextStep.groups);
-    setDimensions({ width: nextStep.width, height: nextStep.height });
-
-    if (!nextStep.layers.some(l => l.id === activeLayerId) && nextStep.layers.length > 0) {
-      setActiveLayerId(nextStep.layers[0].id);
-    }
-  }, [historyFuture, layers, groups, dimensions, activeLayerId]);
+    restoreHistoryStep(nextStep);
+  }, [historyFuture, frames, dimensions, restoreHistoryStep]);
 
   // 단축키 이벤트 리스너 (Undo, Redo, Tools)
   useEffect(() => {
@@ -449,6 +484,117 @@ export default function App() {
     setActiveLayerId(newId);
   };
 
+  // --- 프레임 관리 ---
+
+  /**
+   * 프레임을 전환한다. 레이어는 프레임마다 독립적이므로 활성 레이어도 옮겨야 한다.
+   * 같은 id가 없으면 같은 순번의 레이어를 고른다 — 프레임을 복제해 이어 그릴 때
+   * 방금까지 그리던 위치를 그대로 유지해준다.
+   */
+  const handleSelectFrame = (frameId: string) => {
+    const frame = frames.find(f => f.id === frameId);
+    if (!frame || frame.layers.length === 0) return;
+
+    setActiveFrameId(frameId);
+    if (frame.layers.some(l => l.id === activeLayerId)) return;
+
+    const currentIdx = layers.findIndex(l => l.id === activeLayerId);
+    const next = frame.layers[currentIdx] ?? frame.layers[frame.layers.length - 1];
+    setActiveLayerId(next.id);
+  };
+
+  /** 빈 프레임을 활성 프레임 뒤에 추가한다 */
+  const handleAddFrame = () => {
+    pushHistory('프레임 추가');
+    const stamp = Date.now();
+    const newLayer: Layer = {
+      id: `layer-${stamp}`,
+      name: '레이어 1',
+      groupId: null,
+      visible: true,
+      locked: false,
+      opacity: 1.0,
+      pixels: new Array(dimensions.width * dimensions.height).fill(''),
+    };
+    const newFrame: Frame = {
+      id: `frame-${stamp}`,
+      name: `프레임 ${frames.length + 1}`,
+      groups: [],
+      layers: [newLayer],
+    };
+
+    setFrames(prev => {
+      const idx = prev.findIndex(f => f.id === activeFrameId);
+      const next = [...prev];
+      next.splice(idx + 1, 0, newFrame);
+      return next;
+    });
+    setActiveFrameId(newFrame.id);
+    setActiveLayerId(newLayer.id);
+  };
+
+  /** 프레임을 레이어 스택째 복제한다 (애니메이션에서 이전 장을 이어 그릴 때) */
+  const handleDuplicateFrame = (id: string) => {
+    const target = frames.find(f => f.id === id);
+    if (!target) return;
+    pushHistory('프레임 복제');
+
+    const stamp = Date.now();
+    const cloned: Frame = {
+      id: `frame-${stamp}`,
+      name: `${target.name} (복사본)`,
+      groups: target.groups.map(g => ({ ...g })),
+      // pixels는 편집 시 새 배열로 교체되므로 참조를 공유해도 안전하다
+      layers: target.layers.map((layer, i) => ({ ...layer, id: `layer-${stamp}-${i}` })),
+    };
+
+    setFrames(prev => {
+      const idx = prev.findIndex(f => f.id === id);
+      const next = [...prev];
+      next.splice(idx + 1, 0, cloned);
+      return next;
+    });
+    setActiveFrameId(cloned.id);
+
+    // 복제 전에 그리던 레이어와 같은 순번을 이어서 선택
+    const currentIdx = target.layers.findIndex(l => l.id === activeLayerId);
+    const nextLayer = cloned.layers[currentIdx] ?? cloned.layers[cloned.layers.length - 1];
+    setActiveLayerId(nextLayer.id);
+  };
+
+  const handleDeleteFrame = (id: string) => {
+    if (frames.length <= 1) return;
+    pushHistory('프레임 삭제');
+
+    const idx = frames.findIndex(f => f.id === id);
+    const remaining = frames.filter(f => f.id !== id);
+    setFrames(remaining);
+
+    if (activeFrameId === id) {
+      const fallback = remaining[Math.min(idx, remaining.length - 1)];
+      setActiveFrameId(fallback.id);
+      setActiveLayerId(fallback.layers[fallback.layers.length - 1].id);
+    }
+  };
+
+  const handleMoveFrame = (id: string, direction: 'left' | 'right') => {
+    const idx = frames.findIndex(f => f.id === id);
+    if (idx === -1) return;
+    const targetIdx = direction === 'left' ? idx - 1 : idx + 1;
+    if (targetIdx < 0 || targetIdx >= frames.length) return;
+
+    pushHistory(`프레임 ${direction === 'left' ? '앞' : '뒤'}으로 이동`);
+    setFrames(prev => {
+      const next = [...prev];
+      [next[idx], next[targetIdx]] = [next[targetIdx], next[idx]];
+      return next;
+    });
+  };
+
+  const handleRenameFrame = (id: string, name: string) => {
+    setFrames(prev => prev.map(f => f.id === id ? { ...f, name } : f));
+  };
+
   // 레이어 삭제
   const handleDeleteLayer = (id: string) => {
     if (layers.length <= 1) return;
@@ -585,34 +731,36 @@ export default function App() {
     const oldW = dimensions.width;
     const oldH = dimensions.height;
 
-    setLayers(prevLayers => {
-      return prevLayers.map(layer => {
-        const newPixels = new Array(newWidth * newHeight).fill('');
+    const resizePixels = (pixels: string[]): string[] => {
+      const newPixels = new Array(newWidth * newHeight).fill('');
 
-        if (mode === 'clear') {
-          return { ...layer, pixels: newPixels };
-        }
+      if (mode === 'clear') return newPixels;
 
-        if (mode === 'crop-expand') {
-          for (let y = 0; y < Math.min(oldH, newHeight); y++) {
-            for (let x = 0; x < Math.min(oldW, newWidth); x++) {
-              newPixels[y * newWidth + x] = layer.pixels[y * oldW + x];
-            }
-          }
-        } else if (mode === 'rescale') {
-          // Nearest-Neighbor Rescale
-          for (let y = 0; y < newHeight; y++) {
-            for (let x = 0; x < newWidth; x++) {
-              const srcX = Math.floor((x / newWidth) * oldW);
-              const srcY = Math.floor((y / newHeight) * oldH);
-              newPixels[y * newWidth + x] = layer.pixels[srcY * oldW + srcX] || '';
-            }
+      if (mode === 'crop-expand') {
+        for (let y = 0; y < Math.min(oldH, newHeight); y++) {
+          for (let x = 0; x < Math.min(oldW, newWidth); x++) {
+            newPixels[y * newWidth + x] = pixels[y * oldW + x];
           }
         }
+      } else if (mode === 'rescale') {
+        // Nearest-Neighbor Rescale
+        for (let y = 0; y < newHeight; y++) {
+          for (let x = 0; x < newWidth; x++) {
+            const srcX = Math.floor((x / newWidth) * oldW);
+            const srcY = Math.floor((y / newHeight) * oldH);
+            newPixels[y * newWidth + x] = pixels[srcY * oldW + srcX] || '';
+          }
+        }
+      }
 
-        return { ...layer, pixels: newPixels };
-      });
-    });
+      return newPixels;
+    };
+
+    // 캔버스 크기는 문서 전체의 속성이므로 활성 프레임만이 아니라 모든 프레임을 옮긴다.
+    setFrames(prev => prev.map(frame => ({
+      ...frame,
+      layers: frame.layers.map(layer => ({ ...layer, pixels: resizePixels(layer.pixels) })),
+    })));
 
     setDimensions({ width: newWidth, height: newHeight });
   };
@@ -627,7 +775,8 @@ export default function App() {
     pushHistory('이미지 도트 변환 적용');
 
     if (!asNewLayer || targetWidth !== dimensions.width || targetHeight !== dimensions.height) {
-      // 캔버스 크기도 타겟 해상도로 맞춤
+      // 캔버스 크기가 바뀌면 기존 프레임들은 그 크기에 맞지 않으므로,
+      // 변환 결과만 담은 프레임 한 장으로 새로 시작한다.
       setDimensions({ width: targetWidth, height: targetHeight });
       const newLayer: Layer = {
         id: `layer-${Date.now()}`,
@@ -638,7 +787,14 @@ export default function App() {
         opacity: 1.0,
         pixels,
       };
-      setLayers([newLayer]);
+      const newFrame: Frame = {
+        id: `frame-${Date.now()}`,
+        name: '프레임 1',
+        groups: [],
+        layers: [newLayer],
+      };
+      setFrames([newFrame]);
+      setActiveFrameId(newFrame.id);
       setActiveLayerId(newLayer.id);
     } else {
       // 동일 해상도 새 레이어로 추가
@@ -835,15 +991,15 @@ export default function App() {
 
           {/* 스프라이트 애니메이션 프레임 타임라인 */}
           <SpriteTimeline
-            layers={layers}
-            activeLayerId={activeLayerId}
+            frames={frames}
+            activeFrameId={activeFrame.id}
             width={dimensions.width}
             height={dimensions.height}
-            onSelectFrame={setActiveLayerId}
-            onAddFrame={() => handleAddLayer()}
-            onDuplicateFrame={handleDuplicateLayer}
-            onDeleteFrame={handleDeleteLayer}
-            onMoveFrame={(id, dir) => handleMoveLayer(id, dir === 'left' ? 'down' : 'up')}
+            onSelectFrame={handleSelectFrame}
+            onAddFrame={handleAddFrame}
+            onDuplicateFrame={handleDuplicateFrame}
+            onDeleteFrame={handleDeleteFrame}
+            onMoveFrame={handleMoveFrame}
             onionSkinEnabled={onionSkinEnabled}
             onToggleOnionSkin={() => setOnionSkinEnabled(!onionSkinEnabled)}
             onOpenExportModal={() => setIsExportModalOpen(true)}
@@ -966,11 +1122,11 @@ export default function App() {
       <ExportModal
         isOpen={isExportModalOpen}
         onClose={() => setIsExportModalOpen(false)}
-        layers={layers}
-        groups={groups}
+        frames={frames}
+        activeFrame={activeFrame}
         width={dimensions.width}
         height={dimensions.height}
-        onDuplicateCurrentFrame={() => handleDuplicateLayer(activeLayerId)}
+        onDuplicateCurrentFrame={() => handleDuplicateFrame(activeFrame.id)}
       />
 
       <CodeExportModal

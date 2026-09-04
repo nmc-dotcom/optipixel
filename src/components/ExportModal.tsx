@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Layer, LayerGroup, StripeExportSettings } from '../types';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { Frame, StripeExportSettings } from '../types';
 import { 
   downloadCanvasAsPng, 
   downloadSvgFile, 
@@ -8,7 +8,7 @@ import {
   generateSpriteAtlasJson,
   generateCssSpriteAnimation
 } from '../utils/stripeExport';
-import { compositeLayers } from '../utils/pixelEngine';
+import { compositeLayers, flattenLayers } from '../utils/pixelEngine';
 import { generateSourceCode } from '../utils/codeExport';
 import { 
   Download, 
@@ -27,8 +27,9 @@ import {
 interface ExportModalProps {
   isOpen: boolean;
   onClose: () => void;
-  layers: Layer[];
-  groups: LayerGroup[];
+  frames: Frame[];
+  /** 단일 이미지/코드 내보내기의 대상이 되는 현재 프레임 */
+  activeFrame: Frame;
   width: number;
   height: number;
   onDuplicateCurrentFrame?: () => void;
@@ -37,12 +38,21 @@ interface ExportModalProps {
 export const ExportModal: React.FC<ExportModalProps> = ({
   isOpen,
   onClose,
-  layers,
-  groups,
+  frames,
+  activeFrame,
   width,
   height,
   onDuplicateCurrentFrame,
 }) => {
+  // 단일 이미지/코드 탭은 지금 보고 있는 프레임 하나만 다룬다
+  const layers = activeFrame.layers;
+  const groups = activeFrame.groups;
+
+  // 프레임마다 레이어를 합성한 픽셀 (애니메이션 미리보기용)
+  const framePixels = useMemo(
+    () => frames.map(f => flattenLayers(f.layers, f.groups, width, height)),
+    [frames, width, height]
+  );
   const [activeTab, setActiveTab] = useState<'single' | 'stripe' | 'animation'>('stripe');
   const [copiedCss, setCopiedCss] = useState(false);
 
@@ -73,7 +83,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   useEffect(() => {
     if (!isOpen || activeTab !== 'stripe') return;
 
-    const canvas = generateStripeCanvas(layers, groups, width, height, stripeSettings);
+    const canvas = generateStripeCanvas(frames, width, height, stripeSettings);
     const previewCanvas = previewCanvasRef.current;
     if (!previewCanvas) return;
 
@@ -85,29 +95,27 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(canvas, 0, 0);
     }
-  }, [isOpen, activeTab, layers, groups, width, height, stripeSettings]);
+  }, [isOpen, activeTab, frames, width, height, stripeSettings]);
 
   // 애니메이션 렌더 루프
   useEffect(() => {
     if (!isOpen || activeTab !== 'animation' || !isPlaying) return;
 
-    const visibleLayers = layers.filter(l => l.visible);
-    if (visibleLayers.length === 0) return;
+    if (frames.length === 0) return;
 
     const interval = setInterval(() => {
-      setCurrentFrameIdx(prev => (prev + 1) % visibleLayers.length);
+      setCurrentFrameIdx(prev => (prev + 1) % frames.length);
     }, 1000 / fps);
 
     return () => clearInterval(interval);
-  }, [isOpen, activeTab, isPlaying, fps, layers]);
+  }, [isOpen, activeTab, isPlaying, fps, frames.length]);
 
   // 애니메이션 단일 프레임 렌더
   useEffect(() => {
     if (!isOpen || activeTab !== 'animation') return;
-    const visibleLayers = layers.filter(l => l.visible);
-    if (visibleLayers.length === 0) return;
+    const target = framePixels[currentFrameIdx] || framePixels[0];
+    if (!target) return;
 
-    const targetLayer = visibleLayers[currentFrameIdx] || visibleLayers[0];
     const canvas = animCanvasRef.current;
     if (!canvas) return;
 
@@ -120,14 +128,14 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     ctx.imageSmoothingEnabled = false;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // 단일 레이어 ImageData 렌더
+    // 합성된 프레임 ImageData 렌더
     const temp = document.createElement('canvas');
     temp.width = width;
     temp.height = height;
     const tctx = temp.getContext('2d')!;
     const imgData = tctx.createImageData(width, height);
-    for (let i = 0; i < targetLayer.pixels.length; i++) {
-      const hex = targetLayer.pixels[i];
+    for (let i = 0; i < target.length; i++) {
+      const hex = target[i];
       if (hex) {
         const num = parseInt(hex.replace('#', ''), 16);
         const pIdx = i * 4;
@@ -139,7 +147,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     }
     tctx.putImageData(imgData, 0, 0);
     ctx.drawImage(temp, 0, 0, width, height, 0, 0, canvas.width, canvas.height);
-  }, [isOpen, activeTab, currentFrameIdx, layers, width, height]);
+  }, [isOpen, activeTab, currentFrameIdx, framePixels, width, height]);
 
   if (!isOpen) return null;
 
@@ -176,21 +184,20 @@ export const ExportModal: React.FC<ExportModalProps> = ({
 
   // 스트라이프 다운로드 처리
   const handleDownloadStripe = () => {
-    const canvas = generateStripeCanvas(layers, groups, width, height, stripeSettings);
+    const canvas = generateStripeCanvas(frames, width, height, stripeSettings);
     downloadCanvasAsPng(canvas, `stripe_sheet_${stripeSettings.layout}_${width * stripeSettings.scale}x${height * stripeSettings.scale}.png`);
   };
 
   // 스프라이트 아틀라스 JSON 다운로드 처리
   const handleDownloadAtlasJson = () => {
     const pngName = `stripe_sheet_${stripeSettings.layout}_${width * stripeSettings.scale}x${height * stripeSettings.scale}.png`;
-    const jsonContent = generateSpriteAtlasJson(layers, groups, width, height, stripeSettings, pngName);
+    const jsonContent = generateSpriteAtlasJson(frames, width, height, stripeSettings, pngName);
     downloadJsonFile(jsonContent, `sprite_atlas_${stripeSettings.layout}.json`);
   };
 
   // CSS 스프라이트 steps() 애니메이션 코드 클립보드 복사
   const handleCopyCssAnimation = () => {
-    const targetLayers = layers.filter(l => stripeSettings.includeHiddenLayers || l.visible);
-    const css = generateCssSpriteAnimation(width, height, Math.max(1, targetLayers.length), stripeSettings.scale, fps);
+    const css = generateCssSpriteAnimation(width, height, Math.max(1, frames.length), stripeSettings.scale, fps);
     navigator.clipboard.writeText(css).then(() => {
       setCopiedCss(true);
       setTimeout(() => setCopiedCss(false), 2000);
@@ -261,7 +268,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               </div>
 
               {/* 1개 프레임일 때 안내 배너 및 복제 버튼 */}
-              {layers.length <= 1 ? (
+              {frames.length <= 1 ? (
                 <div className="bg-amber-950/30 border border-amber-800/60 rounded-lg p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-amber-300 text-xs">
                   <div className="flex items-center gap-2">
                     <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0" />
@@ -279,7 +286,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 </div>
               ) : (
                 <div className="bg-emerald-950/20 border border-emerald-800/40 rounded-lg px-3 py-2 flex items-center justify-between text-xs text-emerald-400">
-                  <span>총 <strong>{layers.filter(l => stripeSettings.includeHiddenLayers || l.visible).length}개</strong>의 스프라이트 프레임이 시트로 패킹됩니다.</span>
+                  <span>총 <strong>{frames.length}개</strong>의 스프라이트 프레임이 시트로 패킹됩니다.</span>
                   {onDuplicateCurrentFrame && (
                     <button
                       onClick={onDuplicateCurrentFrame}
@@ -556,7 +563,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 </div>
 
                 <div className="text-xs font-mono text-gray-500">
-                  프레임: {currentFrameIdx + 1} / {layers.filter(l => l.visible).length}
+                  프레임: {currentFrameIdx + 1} / {frames.length}
                 </div>
               </div>
             </div>

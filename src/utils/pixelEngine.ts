@@ -357,6 +357,47 @@ export function compositeLayers(
 }
 
 /**
+ * 한 프레임의 레이어들을 합성해 하나의 픽셀 배열로 만든다.
+ *
+ * 프레임 썸네일, 어니언 스킨, 스프라이트 시트처럼 "프레임 하나를 이미지 하나로"
+ * 다뤄야 하는 곳에서 쓴다. compositeLayers와 같은 결과를 ImageData 대신
+ * 레이어와 동일한 hex 배열 형태로 돌려준다.
+ *
+ * 색이 반복되는 도트 이미지에서 픽셀마다 새 문자열을 만들지 않도록 색상별로
+ * 캐시해 참조를 공유한다.
+ */
+export function flattenLayers(
+  layers: Layer[],
+  groups: LayerGroup[],
+  width: number,
+  height: number
+): string[] {
+  const data = compositeLayers(layers, groups, width, height).data;
+  const out: string[] = new Array(width * height);
+  const cache = new Map<number, string>();
+
+  for (let i = 0; i < out.length; i++) {
+    const p = i * 4;
+    const a = data[p + 3];
+    if (a === 0) {
+      out[i] = '';
+      continue;
+    }
+    const key = (a << 24) | (data[p] << 16) | (data[p + 1] << 8) | data[p + 2];
+    const cached = cache.get(key);
+    if (cached !== undefined) {
+      out[i] = cached;
+      continue;
+    }
+    const hex = rgbaToHex(data[p], data[p + 1], data[p + 2], a / 255);
+    cache.set(key, hex);
+    out[i] = hex;
+  }
+
+  return out;
+}
+
+/**
  * top 레이어를 bottom 레이어 위에 불투명도/표시여부를 반영해 알파 합성한
  * 픽셀 배열을 반환한다 (레이어 병합에 사용)
  */
