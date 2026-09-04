@@ -1,7 +1,9 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-import { Layer, LayerGroup, SelectionRect, ToolType } from '../types';
+import { Layer, LayerGroup, PixelClipboard, SelectionRect, ToolType } from '../types';
 import {
+  clearRegion,
   compositeLayers,
+  copyRegion,
   floodFill,
   getBrushStamp,
   getCirclePoints,
@@ -10,6 +12,7 @@ import {
   hexToRgba,
   magicWandErase,
   normalizeSelection,
+  pasteRegion,
   rgbaToHex
 } from '../utils/pixelEngine';
 import { ZoomIn, ZoomOut, Maximize2, Move as MoveIcon, Sun, Moon } from 'lucide-react';
@@ -109,6 +112,38 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
   const touchCenterRef = useRef<{ x: number; y: number } | null>(null);
 
   const activeLayer = layers.find(l => l.id === activeLayerId);
+
+  /**
+   * 선택 영역을 드래그로 옮기는 중의 상태.
+   *
+   * 시작할 때 영역 안의 픽셀을 떠내고(lifted) 그 자리를 비운 배열(base)을 잡아둔 뒤,
+   * 움직일 때마다 base 위에 lifted를 새 위치로 붙인다. 매번 원본이 아니라 비워둔
+   * 배열에서 다시 시작해야 지나온 자리에 잔상이 남지 않는다.
+   */
+  const selectionMoveRef = useRef<{
+    lifted: PixelClipboard;
+    base: string[];
+    origin: { x: number; y: number };
+    startClientX: number;
+    startClientY: number;
+    /** 실제로 움직였는지 — 제자리 클릭만으로 실행취소 단계를 만들지 않기 위해 */
+    moved: boolean;
+  } | null>(null);
+
+  /** 선택 영역 안의 점인지 */
+  const isInsideSelection = (pt: { x: number; y: number }, rect: SelectionRect) =>
+    pt.x >= rect.x && pt.x < rect.x + rect.width &&
+    pt.y >= rect.y && pt.y < rect.y + rect.height;
+
+  // 선택 영역 위에 커서가 있으면 끌어서 옮길 수 있다는 것을 커서 모양으로 알린다
+  const canMoveSelection =
+    currentTool === 'select' &&
+    !!selection &&
+    !!cursorPos &&
+    isInsideSelection(cursorPos, selection) &&
+    !!activeLayer &&
+    !activeLayer.locked &&
+    activeLayer.visible;
 
   // 캔버스 초기 센터링
   useEffect(() => {
@@ -431,6 +466,26 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
         onChangeSelection(null);
         return;
       }
+      // 이미 확정된 영역 안을 누르면 새로 그리는 대신 그 영역을 끌어서 옮긴다
+      if (
+        selection &&
+        isInsideSelection(selectPt, selection) &&
+        activeLayer &&
+        !activeLayer.locked &&
+        activeLayer.visible
+      ) {
+        selectionMoveRef.current = {
+          lifted: copyRegion(activeLayer.pixels, width, selection),
+          base: clearRegion(activeLayer.pixels, width, selection),
+          origin: { x: selection.x, y: selection.y },
+          startClientX: e.clientX,
+          startClientY: e.clientY,
+          moved: false,
+        };
+        setPendingSelection(selection);
+        return;
+      }
+
       isDrawingRef.current = true;
       startPointRef.current = selectPt;
       setPendingSelection(
@@ -501,6 +556,26 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
       return;
     }
 
+    // 선택 영역을 끌어서 옮기는 중
+    const move = selectionMoveRef.current;
+    if (move && selection && activeLayer) {
+      // 화면 이동량을 캔버스 픽셀로 환산한다. 커서가 캔버스를 벗어나도 계산이 이어진다.
+      const dx = Math.round((e.clientX - move.startClientX) / zoom);
+      const dy = Math.round((e.clientY - move.startClientY) / zoom);
+      const destX = Math.max(0, Math.min(width - selection.width, move.origin.x + dx));
+      const destY = Math.max(0, Math.min(height - selection.height, move.origin.y + dy));
+
+      const movedRect = { ...selection, x: destX, y: destY };
+      setPendingSelection(movedRect);
+
+      const moved = pasteRegion(move.base, width, height, move.lifted, destX, destY);
+      // 첫 이동에서만 실행취소 단계를 남기고, 이후 프레임은 같은 단계에 이어 붙인다
+      const isFirstMove = !move.moved && (destX !== move.origin.x || destY !== move.origin.y);
+      if (isFirstMove) move.moved = true;
+      onUpdateLayerPixels(activeLayer.id, moved, isFirstMove, '선택 영역 이동');
+      return;
+    }
+
     // 선택 영역 드래그 중 (커서가 캔버스 밖으로 나가도 경계까지 확장되도록 pt 없이도 처리)
     if (currentTool === 'select' && isDrawingRef.current && startPointRef.current) {
       const edge = pt ?? clampToCanvas(e.clientX, e.clientY);
@@ -560,6 +635,15 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
   const handlePointerUp = (e: React.PointerEvent) => {
     if (isPanning) {
       setIsPanning(false);
+      return;
+    }
+
+    // 선택 영역 이동 확정
+    if (selectionMoveRef.current) {
+      const finished = pendingSelection;
+      selectionMoveRef.current = null;
+      setPendingSelection(null);
+      if (finished) onChangeSelection(finished);
       return;
     }
 
@@ -670,6 +754,14 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
 
         // 선택 드래그 중 커서가 캔버스를 벗어나면, 여기까지 끌린 영역을 그대로 확정한다.
         // (확정하지 않으면 pointerUp이 무시되어 점선만 남고 선택이 되지 않는다)
+        if (selectionMoveRef.current) {
+          const finished = pendingSelection;
+          selectionMoveRef.current = null;
+          setPendingSelection(null);
+          if (finished) onChangeSelection(finished);
+          return;
+        }
+
         if (currentTool === 'select') {
           if (isDrawingRef.current) {
             isDrawingRef.current = false;
@@ -698,9 +790,9 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
       onContextMenu={(e) => e.preventDefault()}
-      className={`relative flex-1 w-full h-full overflow-hidden select-none touch-none cursor-crosshair ${
-        canvasBackdrop === 'dark' ? 'bg-[#050505]' : 'bg-gray-200'
-      }`}
+      className={`relative flex-1 w-full h-full overflow-hidden select-none touch-none ${
+        canMoveSelection ? 'cursor-move' : 'cursor-crosshair'
+      } ${canvasBackdrop === 'dark' ? 'bg-[#050505]' : 'bg-gray-200'}`}
     >
       {/* 캔버스 및 투명 체크판 컨테이너 */}
       <div
