@@ -208,8 +208,8 @@ export const SpriteTimeline: React.FC<SpriteTimelineProps> = ({
   return (
     <div className="bg-[#111111] border-t border-gray-800 text-gray-200 select-none z-20 flex flex-col transition-all">
       {/* 타임라인 헤더 컨트롤 바 */}
-      <div className="flex items-center justify-between px-3 py-1.5 bg-[#161616] border-b border-gray-800/80">
-        <div className="flex items-center gap-3">
+      <div className="flex items-center justify-between gap-3 px-3 py-1.5 bg-[#161616] border-b border-gray-800/80 overflow-x-auto">
+        <div className="flex items-center gap-3 shrink-0">
           <div className="flex items-center gap-1.5 text-xs font-bold text-gray-300">
             <Film className="w-3.5 h-3.5 text-emerald-400" />
             <span className="font-mono text-[11px] uppercase tracking-wider">Sprite Animation Timeline</span>
@@ -309,7 +309,7 @@ export const SpriteTimeline: React.FC<SpriteTimelineProps> = ({
         </div>
 
         {/* 우측 컨트롤: 프레임 추가/복제 및 내보내기 연동 */}
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 shrink-0">
           <button
             onClick={() => onDuplicateFrame(activeFrameId)}
             className="px-2 py-1 rounded text-[11px] font-medium bg-[#161616] hover:bg-gray-800 text-gray-200 border border-gray-700 flex items-center gap-1 transition-colors"
@@ -350,7 +350,7 @@ export const SpriteTimeline: React.FC<SpriteTimelineProps> = ({
 
       {/* 프레임 트랙 (펼쳐진 상태) */}
       {!isCollapsed && (
-        <div className="flex items-center gap-3 p-2.5 overflow-x-auto bg-[#0A0A0A]/90 min-h-[76px]">
+        <div className="flex items-center gap-3 p-2.5 pb-20 md:pb-2.5 overflow-x-auto bg-[#0A0A0A]/90 min-h-[76px]">
           {/* 좌측 실시간 미니 프리뷰 윈도우 */}
           <div className="flex flex-col items-center gap-0.5 border-r border-gray-800 pr-3 flex-shrink-0">
             <span className="text-[9px] font-mono text-gray-500 uppercase">Preview</span>

@@ -58,9 +58,9 @@ export const Navbar: React.FC<NavbarProps> = ({
   const projectInputRef = useRef<HTMLInputElement>(null);
 
   return (
-    <header className="h-12 border-b border-gray-800 bg-[#111111] px-3 md:px-4 flex items-center justify-between z-30 shrink-0 select-none text-gray-300">
+    <header className="h-12 border-b border-gray-800 bg-[#111111] px-3 md:px-4 flex items-center justify-between gap-3 z-30 shrink-0 select-none text-gray-300 overflow-x-auto">
       {/* Brand & Canvas Dimensions Info */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 shrink-0">
         <div className="flex items-center gap-2">
           <div className="w-6 h-6 bg-emerald-500 rounded-sm grid grid-cols-2 shadow-sm overflow-hidden shrink-0">
             <div className="bg-white/20" />
@@ -88,7 +88,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       </div>
 
       {/* 액션 컨트롤 버튼 바 */}
-      <div className="flex items-center gap-1 sm:gap-1.5">
+      <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
         {/* Undo / Redo */}
         <div className="flex items-center bg-[#1A1A1A] border border-gray-800 rounded p-0.5">
           <button

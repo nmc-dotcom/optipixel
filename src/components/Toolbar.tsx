@@ -69,7 +69,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   ];
 
   return (
-    <aside className="fixed bottom-3 left-1/2 -translate-x-1/2 md:translate-x-0 md:static md:left-auto md:bottom-auto w-[94%] max-w-fit md:w-14 bg-[#111111] border border-gray-800 rounded-xl md:rounded-none md:border-r md:border-l-0 md:border-t-0 md:border-b-0 p-2 md:py-3 flex md:flex-col items-center justify-between md:justify-start gap-1 md:gap-2 z-20 shadow-2xl md:shadow-none overflow-x-auto">
+    <aside className="fixed bottom-3 left-1/2 -translate-x-1/2 md:translate-x-0 md:static md:left-auto md:bottom-auto w-[94%] max-w-fit md:w-14 bg-[#111111] border border-gray-800 rounded-xl md:rounded-none md:border-r md:border-l-0 md:border-t-0 md:border-b-0 p-2 md:py-3 flex md:flex-col items-center justify-between md:justify-start gap-1 md:gap-2 z-30 md:z-20 shadow-2xl md:shadow-none overflow-x-auto">
       {/* 도구 모음 */}
       <div className="flex md:flex-col items-center gap-1">
         {tools.map(tool => {
