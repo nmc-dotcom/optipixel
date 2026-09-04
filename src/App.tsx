@@ -850,7 +850,7 @@ export default function App() {
   };
 
   return (
-    <div className="h-screen w-screen flex flex-col overflow-hidden dark bg-[#0A0A0A] text-gray-300">
+    <div className="app-shell w-full flex flex-col overflow-hidden dark bg-[#0A0A0A] text-gray-300">
       {/* 1. 상단 내비게이션 바 */}
       <Navbar
         canvasWidth={dimensions.width}

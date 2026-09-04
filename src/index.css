@@ -12,6 +12,20 @@
   }
 }
 
+/*
+ * 앱 셸 높이.
+ *
+ * 모바일 브라우저는 주소창이 보이는 동안에도 100vh를 "주소창이 숨겨졌을 때의
+ * 높이"로 잡는다. 그래서 100vh로 짜면 화면 아래쪽(타임라인, 떠 있는 도구 막대)이
+ * 보이는 영역 밖으로 밀려나는데, 에디터 셸은 overflow가 막혀 있어 스크롤해서
+ * 꺼낼 수도 없다. 100dvh는 지금 실제로 보이는 높이를 따라간다.
+ * 100vh를 먼저 두어 dvh를 모르는 브라우저에서도 동작하게 한다.
+ */
+.app-shell {
+  height: 100vh;
+  height: 100dvh;
+}
+
 /* 픽셀 투명 체크 보드 패턴 - Elegant Dark Theme */
 .bg-checkered {
   background-image: linear-gradient(45deg, #111111 25%, transparent 25%),
